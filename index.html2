@@ -53,7 +53,7 @@
     box-shadow: 0 0 12px rgba(255,165,0,0.6); }
   #msg { position: fixed; top: 25%; left: 50%; transform: translate(-50%,-50%);
     color: white; font-size: 24px; text-shadow: 3px 3px 8px #000;
-    z-index: 30; pointer-events: none; text-align: center;
+    z-index: 30; pointer-events: none;  text-align: center;
     background: rgba(0,0,0,0.75); padding: 15px 30px; border-radius: 15px;
     opacity: 0; transition: opacity 0.4s; font-weight: bold; }
   #startScreen { position: fixed; inset: 0;
