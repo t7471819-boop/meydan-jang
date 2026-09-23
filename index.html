@@ -1,0 +1,1948 @@
+# ============================================================
+# میدان جنگ - بازی شوتر سه‌بعدی
+# بخش ۱: پایه (زمین + بازیکن + HUD)
+# ============================================================
+
+from ursina import *
+from ursina.prefabs.first_person_controller import FirstPersonController
+import random
+import math
+
+
+# ============================================================
+# راه‌اندازی اولیه
+# ============================================================
+app = Ursina()
+window.title = 'میدان جنگ'
+window.borderless = False
+window.fullscreen = False
+window.exit_button.visible = False
+window.fps_counter.enabled = True
+window.color = color.rgb(135, 206, 235)  # آبی آسمونی
+
+
+# ============================================================
+# تنظیمات کلی بازی
+# ============================================================
+
+# --- بازیکن ---
+PLAYER_MAX_HEALTH = 20
+PLAYER_START_HEALTH = 20
+PLAYER_SPEED = 6
+PLAYER_JUMP_HEIGHT = 1.5
+PLAYER_GRAVITY = 1
+
+# --- جلیقه ---
+VEST_MAX = 80
+VEST_PRICE = 3000
+VEST_PER_PURCHASE = 5
+
+# --- پول ---
+MONEY_LEVEL_1 = 10000
+MONEY_LEVEL_40 = 100000
+
+# --- رنگ‌ها ---
+COLOR_GRASS    = color.rgb(60, 140, 60)     # سبز چمنی
+COLOR_UNIFORM  = color.rgb(40, 90, 40)      # سبز نظامی
+COLOR_HAT      = color.rgb(30, 60, 30)      # سبز تیره کلاه
+COLOR_PANTS    = color.rgb(35, 70, 35)      # سبز تیره شلوار
+COLOR_BOOT     = color.black                # پوتین
+COLOR_BACKPACK = color.rgb(50, 110, 50)     # کوله
+COLOR_SKIN     = color.rgb(220, 180, 140)   # پوست
+COLOR_GRENADE  = color.rgb(50, 200, 50)     # نارنجک
+
+
+# ============================================================
+# وضعیت بازی (Game State)
+# ============================================================
+game_state = {
+    'level': 1,
+    'money': 0,
+    'health': PLAYER_START_HEALTH,
+    'vest': 0,
+    'weapons': {},       # بعداً پر می‌شه
+    'current_weapon': None,
+    'enemies': [],
+    'allies': [],
+    'bosses': [],
+    'game_won': False,
+    'game_lost': False,
+}
+
+
+# ============================================================
+# زمین چمنی ناهموار
+# ============================================================
+class Battlefield(Entity):
+    """زمین چمنی ناهموار برای میدان جنگ"""
+    
+    def __init__(self, level=1, size=80):
+        super().__init__()
+        self.level = level
+        self.size = size
+        self.hills = []
+        self.obstacles = []
+        
+        # --- زمین اصلی ---
+        self.ground = Entity(
+            model='plane',
+            scale=(size, 1, size),
+            texture='grass',
+            color=COLOR_GRASS,
+            collider='box',
+            position=(0, 0, 0)
+        )
+        
+        # --- تپه‌های ناهموار ---
+        self._create_hills()
+        
+        # --- موانع ---
+        self._create_obstacles()
+        
+        # --- آسمان ---
+        self.sky = Sky(texture='sky_default')
+        
+        # --- نور خورشید ---
+        self.sun = DirectionalLight(shadows=True)
+        self.sun.look_at(Vec3(1, -1, -1))
+        
+        # --- نور محیطی ---
+        AmbientLight(color=color.rgba(180, 180, 180, 0.3))
+    
+    def _create_hills(self):
+        """ساخت تپه‌های کوچیک برای ناهمواری زمین"""
+        num_hills = 10 + self.level // 2
+        
+        for _ in range(num_hills):
+            x = random.uniform(-self.size/2 + 8, self.size/2 - 8)
+            z = random.uniform(-self.size/2 + 8, self.size/2 - 8)
+            
+            # جلوتر از بازیکن نباشن (فاصله از مرکز)
+            if abs(x) < 6 and abs(z) < 6:
+                continue
+            
+            sx = random.uniform(3, 7)
+            sy = random.uniform(0.8, 2.5)
+            sz = random.uniform(3, 7)
+            
+            hill = Entity(
+                model='sphere',
+                color=COLOR_GRASS,
+                position=(x, -sy/2 + 0.3, z),
+                scale=(sx, sy, sz),
+                collider='sphere'
+            )
+            self.hills.append(hill)
+    
+    def _create_obstacles(self):
+        """موانع (مکعب‌های چوبی/سنگی)"""
+        num_obstacles = self.level * 2
+        
+        for _ in range(num_obstacles):
+            x = random.uniform(-self.size/2 + 5, self.size/2 - 5)
+            z = random.uniform(-self.size/2 + 5, self.size/2 - 5)
+            
+            if abs(x) < 7 and abs(z) < 7:
+                continue
+            
+            obstacle = Entity(
+                model='cube',
+                color=color.rgb(110, 85, 60),
+                position=(x, 1, z),
+                scale=(random.uniform(1, 2.5), 2, random.uniform(1, 2.5)),
+                collider='box',
+                texture='brick'
+            )
+            self.obstacles.append(obstacle)
+    
+    def cleanup(self):
+        """پاک کردن زمین برای مرحله بعد"""
+        for h in self.hills:
+            destroy(h)
+        for o in self.obstacles:
+            destroy(o)
+        destroy(self.ground)
+        destroy(self.sky)
+        destroy(self.sun)
+        destroy(self)
+
+
+# ============================================================
+# بازیکن
+# ============================================================
+class Player(FirstPersonController):
+    def __init__(self, position=(0, 5, 0)):
+        super().__init__(
+            position=position,
+            speed=PLAYER_SPEED,
+            jump_height=PLAYER_JUMP_HEIGHT,
+            gravity=PLAYER_GRAVITY,
+            mouse_sensitivity=Vec2(40, 40),
+        )
+        self.health = PLAYER_START_HEALTH
+        self.vest = 0
+        self.money = 0
+        self.cursor.visible = True
+        self.is_crouching = False
+        self.is_zooming = False
+        self.normal_speed = PLAYER_SPEED
+        self.crouch_speed = PLAYER_SPEED * 0.5
+    
+    def take_damage(self, damage_to_vest=4, damage_to_health=1):
+        """گرفتن دمیج: اول جلیقه، بعد جون"""
+        if self.vest > 0:
+            # جلیقه دمیج ۲ برابر می‌گیره
+            vest_damage = damage_to_vest
+            if self.vest >= vest_damage:
+                self.vest -= vest_damage
+                print(f'جلیقه: -{vest_damage} → {self.vest}')
+                return
+            else:
+                # جلیقه تموم شد، مازاد به جون می‌ره
+                remaining = vest_damage - self.vest
+                self.vest = 0
+                self.health -= damage_to_health
+                print(f'جلیقه تمام! جون: {self.health}')
+        else:
+            self.health -= damage_to_health
+            print(f'جون: -{damage_to_health} → {self.health}')
+        
+        # افکت قرمز (فلاش)
+        self._damage_flash()
+        
+        if self.health <= 0:
+            self.health = 0
+            self.die()
+    
+    def _damage_flash(self):
+        """فلاش قرمز موقع دمیج"""
+        flash = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=color.rgba(255, 0, 0, 0.3),
+            scale=(2, 1),
+            z=-0.9
+        )
+        flash.animate_color(color.rgba(255, 0, 0, 0), duration=0.3)
+        destroy(flash, delay=0.35)
+    
+    def add_health(self, amount):
+        self.health = min(self.health + amount, PLAYER_MAX_HEALTH)
+    
+    def add_vest(self, amount):
+        self.vest = min(self.vest + amount, VEST_MAX)
+    
+    def add_money(self, amount):
+        self.money += amount
+    
+    def crouch(self):
+        """نشستن"""
+        if not self.is_crouching:
+            self.is_crouching = True
+            self.speed = self.crouch_speed
+            self.scale_y = 0.6
+            self.y -= 0.4
+    
+    def stand_up(self):
+        """بلند شدن"""
+        if self.is_crouching:
+            self.is_crouching = False
+            self.speed = self.normal_speed
+            self.scale_y = 1
+            self.y += 0.4
+    
+    def die(self):
+        game_state['game_lost'] = True
+        print('☠️ باختی!')
+        Text(
+            text='شکست خوردی!',
+            origin=(0, 0),
+            scale=3,
+            color=color.red,
+            background=True
+        )
+
+
+# ============================================================
+# HUD (رابط کاربری)
+# ============================================================
+class HUD:
+    def __init__(self, player):
+        self.player = player
+        
+        # --- متن اصلی (بالا چپ) ---
+        self.info_text = Text(
+            text='',
+            position=(-0.85, 0.45),
+            scale=1.4,
+            color=color.white,
+            background=True,
+            background_color=color.rgba(0, 0, 0, 0.5)
+        )
+        
+        # --- نشانگر وسط صفحه (کراس‌هیر) ---
+        self.crosshair_h = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=color.rgba(255, 255, 255, 0.8),
+            scale=(0.02, 0.003)
+        )
+        self.crosshair_v = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=color.rgba(255, 255, 255, 0.8),
+            scale=(0.003, 0.02)
+        )
+    
+    def update(self):
+        self.info_text.text = (
+            f'❤ جون: {self.player.health}/{PLAYER_MAX_HEALTH}\n'
+            f'🦺 جلیقه: {self.player.vest}/{VEST_MAX}\n'
+            f'💰 پول: {self.player.money:,}\n'
+            f'🎯 مرحله: {game_state["level"]}/40'
+        )
+
+
+# ============================================================
+# ساخت بازی
+# ============================================================
+battlefield = Battlefield(level=game_state['level'])
+player = Player(position=(0, 5, 0))
+hud = HUD(player)
+
+
+# ============================================================
+# کلیدها
+# ============================================================
+def input(key):
+    if key == 'escape':
+        application.quit()
+    
+    if key == 'c':
+        # نشستن
+        player.crouch()
+    
+    if key == 'c up':
+        player.stand_up()
+    
+    # کلید تست: گرفتن دمیج
+    if key == 'h':
+        player.take_damage(damage_to_vest=4, damage_to_health=1)
+    
+    # کلید تست: دادن پول
+    if key == 'm':
+        player.add_money(5000)
+        print(f'پول: {player.money}')
+    
+    # کلید تست: دادن جلیقه
+    if key == 'v':
+        player.add_vest(5)
+        print(f'جلیقه: {player.vest}')
+
+
+# ============================================================
+# Loop اصلی بازی
+# ============================================================
+def update():
+    hud.update()
+    
+    # اگه باختی
+    if game_state['game_lost']:
+        return
+
+
+# ============================================================
+# اجرا
+# ============================================================
+if __name__ == '__main__':
+    app.run()
+def input(key):
+    if key == 'escape':
+        application.quit()
+    
+    if key == 'c':
+        player.crouch()
+    if key == 'c up':
+        player.stand_up()
+    
+    # ====== انتخاب سلاح ======
+    if key == '1': weapon_manager.switch_to(0)
+    if key == '2': weapon_manager.switch_to(1)
+    if key == '3': weapon_manager.switch_to(2)
+    if key == '4': weapon_manager.switch_to(3)
+    if key == '5': weapon_manager.switch_to(4)
+    if key == '6': weapon_manager.switch_to(5)
+    if key == '7': weapon_manager.switch_to(6)
+    
+    # ====== تعویض خشاب ======
+    if key == 'r':
+        weapon_manager.reload_current()
+    
+    # ====== چرخش اسکرول موس ======
+    if key == 'scroll up':
+        weapon_manager.prev_weapon()
+    if key == 'scroll down':
+        weapon_manager.next_weapon()
+    
+    # ====== تست ======
+    if key == 'h':
+        player.take_damage(damage_to_vest=4, damage_to_health=1)
+    if key == 'm':
+        player.add_money(5000)
+    if key == 'v':
+        player.add_vest(5)
+# ============================================================
+# بخش ۳: دشمن‌ها
+# ============================================================
+
+# ============================================================
+# افکت خون (موقع مرگ دشمن)
+# ============================================================
+class BloodEffect(Entity):
+    """افکت پاشیدن خون"""
+    
+    def __init__(self, position):
+        super().__init__(
+            model='sphere',
+            color=color.rgb(180, 0, 0),
+            scale=0.15,
+            position=position
+        )
+        self.life = 0.5
+        self.particles = []
+        
+        # چند تا ذره‌ی خون
+        for _ in range(8):
+            p = Entity(
+                model='sphere',
+                color=color.rgb(200, 20, 20),
+                scale=random.uniform(0.05, 0.12),
+                position=position
+            )
+            p.velocity = Vec3(
+                random.uniform(-3, 3),
+                random.uniform(1, 4),
+                random.uniform(-3, 3)
+            )
+            p.gravity = 12
+            self.particles.append(p)
+    
+    def update(self):
+        self.life -= time.dt
+        for p in self.particles:
+            if not p.enabled:
+                continue
+            p.velocity.y -= p.gravity * time.dt
+            p.position += p.velocity * time.dt
+            
+            # اگه به زمین رسید
+            if p.y < 0.1:
+                p.y = 0.1
+                p.velocity = Vec3(0, 0, 0)
+                p.color = color.rgba(120, 0, 0, 0.5)
+        
+        if self.life <= 0:
+            for p in self.particles:
+                destroy(p)
+            destroy(self)
+
+
+# ============================================================
+# دشمن
+# ============================================================
+class Enemy(Entity):
+    """دشمن با بدن مکعبی و سر دایره‌ای"""
+    
+    def __init__(self, position=(0, 0, 0), armed=False, level=1):
+        super().__init__(
+            position=position,
+            collider='box'
+        )
+        
+        # ====== مشخصات ======
+        self.armed = armed
+        self.level = level
+        
+        # سختی بر اساس مرحله
+        self.max_health = 3 + (level // 5)          # هر ۵ مرحله +۱ جون
+        self.health = self.max_health
+        self.speed = random.uniform(1.5, 2.5) + (level * 0.05)
+        self.attack_range = 15
+        self.fire_cooldown = random.uniform(0.5, 1.5)
+        self.fire_rate = max(0.5, 1.5 - (level * 0.02))
+        self.hit_chance = 0.6 + min(0.3, level * 0.01)
+        
+        # دمیج به جلیقه (بر اساس نوع سلاح دشمن)
+        self.vest_damage = random.choice([2, 4, 4, 6])
+        
+        # ====== انیمیشن دمیج ======
+        self.damage_shake_time = 0
+        self.damage_shake_duration = 0.2
+        self.shake_intensity = 0.15
+        self.original_shake_y = 0
+        
+        # ====== انیمیشن مرگ ======
+        self.is_dying = False
+        self.death_time = 0
+        self.death_duration = 2.5   # چقدر طول بکشه تا محو شه
+        
+        # ====== حالت پرتاب (برای افتادن) ======
+        self.fall_rotation = 0
+        self.fall_target = -90  # میفته عقب
+        
+        # ====== ساخت بدن ======
+        self._build_body()
+        
+        # اضافه به لیست دشمن‌ها
+        game_state['enemies'].append(self)
+    
+    def _build_body(self):
+        """ساخت بدن دشمن از مکعب و دایره"""
+        
+        # === بدن (پیراهن سبز نظامی - مکعب) ===
+        self.body = Entity(
+            parent=self,
+            model='cube',
+            color=COLOR_UNIFORM,
+            scale=(0.7, 1.0, 0.4),
+            position=(0, 0.5, 0),
+            texture=None
+        )
+        
+        # === سر (دایره - پوست) ===
+        self.head = Entity(
+            parent=self,
+            model='sphere',
+            color=COLOR_SKIN,
+            scale=0.35,
+            position=(0, 1.3, 0)
+        )
+        
+        # === چشم‌ها (دو دایره‌ی کوچیک مشکی) ===
+        self.eye_l = Entity(
+            parent=self,
+            model='sphere',
+            color=color.black,
+            scale=0.06,
+            position=(-0.08, 1.32, 0.16)
+        )
+        self.eye_r = Entity(
+            parent=self,
+            model='sphere',
+            color=color.black,
+            scale=0.06,
+            position=(0.08, 1.32, 0.16)
+        )
+        
+        # === کلاه سربازی (مکعب سبز تیره) ===
+        self.hat = Entity(
+            parent=self,
+            model='cube',
+            color=COLOR_HAT,
+            scale=(0.42, 0.14, 0.42),
+            position=(0, 1.5, 0)
+        )
+        
+        # === نقاب کلاه (لبه) ===
+        self.hat_brim = Entity(
+            parent=self,
+            model='cube',
+            color=COLOR_HAT,
+            scale=(0.44, 0.04, 0.2),
+            position=(0, 1.44, 0.15)
+        )
+        
+        # === شلوار (مکعب سبز تیره) ===
+        self.pants = Entity(
+            parent=self,
+            model='cube',
+            color=COLOR_PANTS,
+            scale=(0.65, 0.6, 0.4),
+            position=(0, -0.15, 0)
+        )
+        
+        # === پوتین چپ (مکعب مشکی) ===
+        self.boot_l = Entity(
+            parent=self,
+            model='cube',
+            color=COLOR_BOOT,
+            scale=(0.22, 0.18, 0.4),
+            position=(-0.18, -0.55, 0)
+        )
+        
+        # === پوتین راست (مکعب مشکی) ===
+        self.boot_r = Entity(
+            parent=self,
+            model='cube',
+            color=COLOR_BOOT,
+            scale=(0.22, 0.18, 0.4),
+            position=(0.18, -0.55, 0)
+        )
+        
+        # === کوله پشتی سبز (پشت بدن) ===
+        self.backpack = Entity(
+            parent=self,
+            model='cube',
+            color=COLOR_BACKPACK,
+            scale=(0.5, 0.7, 0.25),
+            position=(0, 0.55, -0.32)
+        )
+        
+        # === دست چپ (دایره - پوست) ===
+        self.arm_l = Entity(
+            parent=self,
+            model='sphere',
+            color=COLOR_SKIN,
+            scale=0.18,
+            position=(-0.45, 0.7, 0)
+        )
+        
+        # === دست راست (دایره - پوست) ===
+        self.arm_r = Entity(
+            parent=self,
+            model='sphere',
+            color=COLOR_SKIN,
+            scale=0.18,
+            position=(0.45, 0.7, 0)
+        )
+        
+        # === اسلحه (اگه مسلح باشه) ===
+        if self.armed:
+            self.gun = Entity(
+                parent=self,
+                model='cube',
+                color=color.rgb(30, 30, 30),
+                scale=(0.08, 0.08, 0.55),
+                position=(0.45, 0.7, 0.3)
+            )
+            # درخشش دهانه (وقتی شلیک می‌کنه)
+            self.muzzle = Entity(
+                parent=self,
+                model='sphere',
+                color=color.rgba(255, 200, 50, 0.9),
+                scale=0.12,
+                position=(0.45, 0.7, 0.6),
+                enabled=False
+            )
+    
+    # ========================================================
+    # به‌روزرسانی هر فریم
+    # ========================================================
+    def update(self):
+        # اگه داره می‌میره، انیمیشن مرگ اجرا شه
+        if self.is_dying:
+            self._update_death_animation()
+            return
+        
+        # اگه بازی تموم شده، کاری نکن
+        if game_state['game_lost'] or game_state['game_won']:
+            return
+        
+        # انیمیشن دمیج
+        if self.damage_shake_time > 0:
+            self.damage_shake_time -= time.dt
+            # لرزش تصادفی
+            self.rotation_z = math.sin(time.time() * 60) * self.shake_intensity * 20
+            self.y = self.original_shake_y + math.sin(time.time() * 60) * self.shake_intensity * 0.3
+        else:
+            self.rotation_z = 0
+        
+        # فاصله تا بازیکن
+        dist = distance(self, player)
+        
+        # حرکت به سمت بازیکن
+        if dist > 2.5:
+            direction = (player.position - self.position).normalized()
+            direction.y = 0
+            self.position += direction * self.speed * time.dt
+        
+        # چرخش به سمت بازیکن
+        self.look_at(Vec3(player.x, self.y, player.z))
+        
+        # اگه مسلح بود و در محدوده بود، شلیک کنه
+        if self.armed and dist < self.attack_range:
+            self.fire_cooldown -= time.dt
+            if self.fire_cooldown <= 0:
+                self.fire_cooldown = self.fire_rate
+                self.shoot_at_player()
+        
+        # اگه دست خالی بود و رسید، ضربه بزنه (اختیاری)
+        elif not self.armed and dist < 2:
+            self.fire_cooldown -= time.dt
+            if self.fire_cooldown <= 0:
+                self.fire_cooldown = 1.0
+                # ضربه‌ی دست خالی - دمیج کمتر
+                player.take_damage(damage_to_vest=2, damage_to_health=1)
+    
+    # ========================================================
+    # شلیک به بازیکن
+    # ========================================================
+    def shoot_at_player(self):
+        """شلیک به بازیکن"""
+        # افکت muzzle flash
+        if hasattr(self, 'muzzle'):
+            self.muzzle.enabled = True
+            invoke(setattr, self.muzzle, 'enabled', False, delay=0.08)
+        
+        # احتمال اصابت
+        if random.random() < self.hit_chance:
+            player.take_damage(
+                damage_to_vest=self.vest_damage,
+                damage_to_health=1
+            )
+    
+    # ========================================================
+    # گرفتن دمیج
+    # ========================================================
+    def take_damage(self, amount=1):
+        """گرفتن دمیج از بازیکن"""
+        if self.is_dying:
+            return
+        
+        self.health -= amount
+        
+        # انیمیشن دمیج (لرزش)
+        self._play_damage_animation()
+        
+        # اگه مرد
+        if self.health <= 0:
+            self.die()
+    
+    def _play_damage_animation(self):
+        """انیمیشن دمیج - تکون + قرمز شدن"""
+        self.damage_shake_time = self.damage_shake_duration
+        self.original_shake_y = self.y
+        
+        # همه‌ی اعضای بدن قرمز بشن
+        original_colors = []
+        parts = [self.body, self.head, self.pants, 
+                 self.arm_l, self.arm_r, self.boot_l, self.boot_r]
+        
+        for part in parts:
+            original_colors.append((part, part.color))
+            part.color = color.rgb(255, 80, 80)
+        
+        # برگردونن به رنگ اصلی
+        def restore():
+            for part, col in original_colors:
+                if part.enabled:
+                    part.color = col
+        
+        invoke(restore, delay=0.15)
+    
+    # ========================================================
+    # مرگ
+    # ========================================================
+    def die(self):
+        """شروع انیمیشن مرگ"""
+        if self.is_dying:
+            return
+        
+        self.is_dying = True
+        self.death_time = 0
+        
+        # افکت خون
+        blood = BloodEffect(position=self.position + Vec3(0, 1, 0))
+        blood.update = lambda: self._update_blood(blood)
+    
+    def _update_blood(self, blood):
+        """آپدیت افکت خون"""
+        blood.life -= time.dt
+        for p in blood.particles:
+            if not p.enabled:
+                continue
+            p.velocity.y -= 12 * time.dt
+            p.position += p.velocity * time.dt
+            if p.y < 0.1:
+                p.y = 0.1
+                p.velocity = Vec3(0, 0, 0)
+        if blood.life <= 0:
+            for p in blood.particles:
+                destroy(p)
+            destroy(blood)
+    
+    def _update_death_animation(self):
+        """انیمیشن مرگ: افتادن + محو شدن"""
+        self.death_time += time.dt
+        
+        # مرحله ۱: افتادن به عقب (۰ تا ۰.۸ ثانیه)
+        if self.death_time < 0.8:
+            progress = self.death_time / 0.8
+            # چرخش نرم به عقب
+            self.rotation_x = -90 * progress
+            # یه ذره هم پایین‌تر
+            self.y = max(0.2, 1 - progress * 0.8)
+        
+        # مرحله ۲: ثابت روی زمین (۰.۸ تا ۱.۵ ثانیه)
+        elif self.death_time < 1.5:
+            self.rotation_x = -90
+            self.y = 0.2
+        
+        # مرحله ۳: محو شدن نرم (۱.۵ تا ۲.۵ ثانیه)
+        else:
+            progress = (self.death_time - 1.5) / 1.0
+            alpha = 1 - progress
+            
+            # کم کردن شفافیت همه‌ی اعضا
+            all_parts = [
+                self.body, self.head, self.pants,
+                self.arm_l, self.arm_r,
+                self.boot_l, self.boot_r,
+                self.hat, self.hat_brim,
+                self.backpack, self.eye_l, self.eye_r
+            ]
+            if self.armed and hasattr(self, 'gun'):
+                all_parts.append(self.gun)
+            
+            for part in all_parts:
+                if part and part.enabled:
+                    c = part.color
+                    part.color = color.rgba(c[0], c[1], c[2], alpha)
+            
+            # وقتی کامل محو شد، حذف
+            if progress >= 1.0:
+                self._remove()
+    
+    def _remove(self):
+        """حذف کامل دشمن"""
+        if self in game_state['enemies']:
+            game_state['enemies'].remove(self)
+        
+        # دادن پول به بازیکن
+        reward = 200 + (self.level * 50)
+        player.add_money(reward)
+        
+        destroy(self)
+
+
+# ============================================================
+# سیستم ساخت موج دشمن‌ها
+# ============================================================
+class EnemySpawner:
+    """مدیریت ساخت دشمن‌ها"""
+    
+    def __init__(self):
+        self.spawned = 0
+        self.spawn_radius = 35
+    
+    def spawn_wave(self, level, count):
+        """ساخت موج دشمن"""
+        for i in range(count):
+            # موقعیت تصادفی دور بازیکن
+            angle = random.uniform(0, 2 * math.pi)
+            distance_from_player = random.uniform(20, self.spawn_radius)
+            
+            x = player.x + math.cos(angle) * distance_from_player
+            z = player.z + math.sin(angle) * distance_from_player
+            
+            # ۵۰٪ مسلح
+            armed = random.random() < 0.5
+            
+            # ساخت دشمن
+            enemy = Enemy(
+                position=(x, 1, z),
+                armed=armed,
+                level=level
+            )
+            
+            self.spawned += 1
+        
+        print(f'👥 موج دشمن: {count} تا (کل: {self.spawned})')
+
+
+# ============================================================
+# شروع موج اول
+# ============================================================
+enemy_spawner = EnemySpawner()
+
+# توی مرحله ۱، ۵ دشمن
+enemy_spawner.spawn_wave(
+    level=game_state['level'],
+    count=5
+)
+
+
+# ============================================================
+# HUD دشمن‌ها رو هم نشون بده
+# ============================================================
+def update_hud_with_enemies():
+    """به‌روزرسانی HUD با تعداد دشمن"""
+    alive = len([e for e in game_state['enemies'] if e.enabled and not e.is_dying])
+    hud.info_text.text = (
+        f'❤ جون: {player.health}/{PLAYER_MAX_HEALTH}\n'
+        f'🦺 جلیقه: {player.vest}/{VEST_MAX}\n'
+        f'💰 پول: {player.money:,}\n'
+        f'🎯 مرحله: {game_state["level"]}/40\n'
+        f'👥 دشمن‌ها: {alive}'
+    )
+# ============================================================
+# بخش ۴: انفجار و تجهیزات (نارنجک + ماشین زرهی)
+# ============================================================
+
+# ============================================================
+# افکت انفجار
+# ============================================================
+class Explosion(Entity):
+    """انفجار با دود + جرقه + شعاع تخریب"""
+    
+    def __init__(self, position, radius=45, damage=10):
+        super().__init__(position=position)
+        self.radius = radius
+        self.damage = damage
+        self.life = 0
+        self.duration = 1.5
+        
+        # ====== کره‌ی آتش ======
+        self.fireball = Entity(
+            parent=self,
+            model='sphere',
+            color=color.rgba(255, 200, 50, 0.9),
+            scale=0.5,
+            position=(0, 0, 0)
+        )
+        
+        # ====== کره‌ی نارنجی (لایه‌ی دوم) ======
+        self.fireball2 = Entity(
+            parent=self,
+            model='sphere',
+            color=color.rgba(255, 100, 0, 0.7),
+            scale=0.8,
+            position=(0, 0, 0)
+        )
+        
+        # ====== نور انفجار ======
+        self.light = PointLight(
+            parent=self,
+            color=color.rgba(255, 180, 50, 1),
+            position=(0, 1, 0)
+        )
+        
+        # ====== دود خاکستری ======
+        self.smoke_particles = []
+        for _ in range(15):
+            smoke = Entity(
+                model='sphere',
+                color=color.rgba(100, 100, 100, 0.7),
+                scale=random.uniform(1.5, 3),
+                position=position + Vec3(
+                    random.uniform(-2, 2),
+                    random.uniform(0, 3),
+                    random.uniform(-2, 2)
+                )
+            )
+            smoke.velocity = Vec3(
+                random.uniform(-1.5, 1.5),
+                random.uniform(2, 4),
+                random.uniform(-1.5, 1.5)
+            )
+            self.smoke_particles.append(smoke)
+        
+        # ====== لاستیک‌های سیاه (فقط برای ماشین زرهی) ======
+        self.tires = []
+        for _ in range(4):
+            tire = Entity(
+                model='cube',
+                color=color.black,
+                scale=random.uniform(0.4, 0.6),
+                position=position + Vec3(0, 1, 0)
+            )
+            tire.velocity = Vec3(
+                random.uniform(-10, 10),
+                random.uniform(12, 20),
+                random.uniform(-10, 10)
+            )
+            tire.rotation_speed = Vec3(
+                random.uniform(-720, 720),
+                random.uniform(-720, 720),
+                random.uniform(-720, 720)
+            )
+            self.tires.append(tire)
+        
+        # ====== اعمال دمیج به دشمن‌های توی شعاع ======
+        self._apply_damage()
+        
+        # صدای انفجار (اگه صدا داشته باشیم)
+        # Audio('explosion', autoplay=True)  # بعداً
+    
+    def _apply_damage(self):
+        """دمیج به هر چیزی توی شعاع انفجار"""
+        # دشمن‌ها
+        for enemy in list(game_state['enemies']):
+            if not enemy.enabled or enemy.is_dying:
+                continue
+            dist = distance(self.position, enemy.position)
+            if dist <= self.radius:
+                # دمیج بر اساس فاصله (نزدیک‌تر = بیشتر)
+                dmg_multiplier = 1 - (dist / self.radius)
+                total_damage = int(self.damage * (0.5 + dmg_multiplier))
+                enemy.take_damage(total_damage)
+                print(f'💥 دشمن توی شعاع ({dist:.1f}م): -{total_damage} HP')
+        
+        # ماشین‌های زرهی
+        for armored in list(game_state.get('armored_cars', [])):
+            if not armored.enabled:
+                continue
+            dist = distance(self.position, armored.position)
+            if dist <= self.radius:
+                armored.destroy_car()
+    
+    def update(self):
+        self.life += time.dt
+        progress = self.life / self.duration
+        
+        # گسترش کره‌ی آتش
+        if self.fireball.enabled:
+            scale = 0.5 + progress * 8
+            self.fireball.scale = scale
+            self.fireball.color = color.rgba(255, 200, 50, max(0, 0.9 - progress * 1.5))
+            
+            if progress > 0.3:
+                destroy(self.fireball)
+        
+        if self.fireball2.enabled:
+            scale = 0.8 + progress * 10
+            self.fireball2.scale = scale
+            self.fireball2.color = color.rgba(255, 100, 0, max(0, 0.7 - progress))
+            
+            if progress > 0.5:
+                destroy(self.fireball2)
+        
+        # محو شدن نور
+        if self.light.enabled:
+            self.light.color = color.rgba(255, 180, 50, max(0, 1 - progress * 2))
+            if progress > 0.5:
+                destroy(self.light)
+        
+        # حرکت دود
+        for smoke in self.smoke_particles:
+            if not smoke.enabled:
+                continue
+            smoke.velocity.y -= 1 * time.dt  # جاذبه‌ی کم
+            smoke.position += smoke.velocity * time.dt
+            smoke.scale += time.dt * 1.5
+            # کم‌رنگ شدن
+            c = smoke.color
+            smoke.color = color.rgba(c[0], c[1], c[2], max(0, c[3] - time.dt * 0.4))
+        
+        # حرکت لاستیک‌ها
+        for tire in self.tires:
+            if not tire.enabled:
+                continue
+            tire.velocity.y -= 25 * time.dt  # جاذبه
+            tire.position += tire.velocity * time.dt
+            tire.rotation += tire.rotation_speed * time.dt
+            
+            # اگه به زمین رسید
+            if tire.y < 0.3:
+                tire.y = 0.3
+                tire.velocity = Vec3(
+                    tire.velocity.x * 0.5,
+                    0,
+                    tire.velocity.z * 0.5
+                )
+                if abs(tire.velocity.x) < 0.5 and abs(tire.velocity.z) < 0.5:
+                    tire.velocity = Vec3(0, 0, 0)
+        
+        # پایان انفجار
+        if self.life >= self.duration:
+            for smoke in self.smoke_particles:
+                destroy(smoke)
+            for tire in self.tires:
+                destroy(tire)
+            destroy(self)
+
+
+# ============================================================
+# نارنجک
+# ============================================================
+class Grenade(Entity):
+    """نارنجک سبز"""
+    
+    def __init__(self, position, direction, owner='player'):
+        super().__init__(
+            model='sphere',
+            color=COLOR_GRENADE,
+            scale=0.25,
+            position=position
+        )
+        
+        # فیزیک
+        self.velocity = direction * 15 + Vec3(0, 5, 0)
+        self.gravity = 20
+        self.fuse_time = 3.0    # ۳ ثانیه تا انفجار
+        self.timer = 0
+        
+        # برای چشمک زدن
+        self.blink_time = 0
+        
+        print('💣 نارنجک پرتاب شد!')
+    
+    def update(self):
+        self.timer += time.dt
+        
+        # فیزیک پرتاب
+        self.velocity.y -= self.gravity * time.dt
+        self.position += self.velocity * time.dt
+        
+        # برخورد با زمین
+        if self.y < 0.15:
+            self.y = 0.15
+            self.velocity.y = -self.velocity.y * 0.3  # جهش
+            self.velocity.x *= 0.6
+            self.velocity.z *= 0.6
+        
+        # چشمک زدن (وقتی نزدیک انفجار)
+        if self.timer > self.fuse_time - 1.0:
+            self.blink_time += time.dt
+            if int(self.blink_time * 8) % 2 == 0:
+                self.color = color.rgb(255, 0, 0)
+            else:
+                self.color = COLOR_GRENADE
+        
+        # انفجار
+        if self.timer >= self.fuse_time:
+            self.explode()
+    
+    def explode(self):
+        """انفجار نارنجک"""
+        explosion = Explosion(
+            position=self.position,
+            radius=10,           # شعاع نارنجک کمتر
+            damage=5
+        )
+        
+        # انفجار فقط یه بار
+        destroy(self)
+
+
+# ============================================================
+# ماشین زرهی
+# ============================================================
+class ArmoredCar(Entity):
+    """ماشین زرهی دشمن"""
+    
+    def __init__(self, position=(0, 0, 0), level=1):
+        super().__init__(
+            position=position,
+            collider='box'
+        )
+        
+        self.level = level
+        self.max_health = 100 + (level * 20)
+        self.health = self.max_health
+        self.speed = 2.5
+        self.is_destroyed = False
+        
+        # ====== بدن ماشین (مکعب بزرگ) ======
+        self.chassis = Entity(
+            parent=self,
+            model='cube',
+            color=color.rgb(70, 80, 50),       # سبز نظامی
+            scale=(2.5, 1, 4),
+            position=(0, 1, 0)
+        )
+        
+        # ====== سقف (زره) ======
+        self.roof = Entity(
+            parent=self,
+            model='cube',
+            color=color.rgb(60, 70, 40),
+            scale=(2.2, 0.6, 3.5),
+            position=(0, 1.7, -0.2)
+        )
+        
+        # ====== برجک ======
+        self.turret = Entity(
+            parent=self,
+            model='cube',
+            color=color.rgb(80, 90, 60),
+            scale=(1.2, 0.8, 1.2),
+            position=(0, 2.3, -0.5)
+        )
+        
+        # ====== لوله‌ی تفنگ ======
+        self.barrel = Entity(
+            parent=self,
+            model='cube',
+            color=color.rgb(50, 50, 50),
+            scale=(0.15, 0.15, 2),
+            position=(0, 2.3, 0.8)
+        )
+        
+        # ====== چرخ‌ها (۴ تا لاستیک سیاه) ======
+        wheel_positions = [
+            (-1.3, 0.5, 1.3),
+            (1.3, 0.5, 1.3),
+            (-1.3, 0.5, -1.3),
+            (1.3, 0.5, -1.3)
+        ]
+        self.wheels = []
+        for pos in wheel_positions:
+            wheel = Entity(
+                parent=self,
+                model='sphere',
+                color=color.black,
+                scale=0.8,
+                position=pos
+            )
+            self.wheels.append(wheel)
+        
+        # ====== چراغ جلو ======
+        self.headlight = PointLight(
+            parent=self,
+            color=color.rgba(255, 255, 200, 0.5),
+            position=(0, 1, 2.2)
+        )
+        
+        # اضافه به لیست
+        if 'armored_cars' not in game_state:
+            game_state['armored_cars'] = []
+        game_state['armored_cars'].append(self)
+    
+    def update(self):
+        if self.is_destroyed:
+            return
+        
+        if game_state['game_lost'] or game_state['game_won']:
+            return
+        
+        # حرکت به سمت بازیکن
+        dist = distance(self, player)
+        if dist > 8:
+            direction = (player.position - self.position).normalized()
+            direction.y = 0
+            self.position += direction * self.speed * time.dt
+            
+            # چرخش چرخ‌ها
+            for wheel in self.wheels:
+                wheel.rotation_x += 200 * time.dt
+        
+        # چرخش به سمت بازیکن
+        self.look_at(Vec3(player.x, self.y, player.z))
+    
+    def take_damage(self, amount=1):
+        """گرفتن دمیج (فقط RPG و نارنجک مؤثرن)"""
+        # گلوله‌ی معمولی به زره اثر نداره
+        if amount < 50:
+            print('🛡 گلوله به زره اثر نداره!')
+            return
+        
+        self.health -= amount
+        
+        if self.health <= 0:
+            self.destroy_car()
+    
+    def destroy_car(self):
+        """انفجار ماشین زرهی"""
+        if self.is_destroyed:
+            return
+        
+        self.is_destroyed = True
+        
+        # انفجار بزرگ با لاستیک
+        explosion = Explosion(
+            position=self.position + Vec3(0, 1, 0),
+            radius=45,         # شعاع ۴۵ متر
+            damage=20
+        )
+        
+        # حذف ماشین
+        destroy(self)
+        
+        # حذف از لیست
+        if self in game_state.get('armored_cars', []):
+            game_state['armored_cars'].remove(self)
+        
+        print('💥 ماشین زرهی منفجر شد! شعاع ۴۵ متر')
+
+
+# ============================================================
+# سیستم نارنجک بازیکن
+# ============================================================
+class PlayerGrenadeSystem:
+    """مدیریت نارنجک‌های بازیکن"""
+    
+    def __init__(self):
+        self.grenades = 5       # تعداد نارنجک
+        self.max_grenades = 10
+        self.throw_cooldown = 0
+        self.throw_rate = 1.0   # فاصله بین پرتاب‌ها
+    
+    def can_throw(self):
+        return (self.grenades > 0 
+                and self.throw_cooldown <= 0
+                and player.is_crouching     # باید نشسته باشه
+                and not game_state['game_lost'])
+    
+    def throw(self):
+        """پرتاب نارنجک (فقط موقع نشستن)"""
+        if not self.can_throw():
+            if not player.is_crouching:
+                print('❌ برای پرتاب نارنجک باید بشینی (C)')
+            elif self.grenades <= 0:
+                print('❌ نارنجک نداری!')
+            return
+        
+        self.grenades -= 1
+        self.throw_cooldown = self.throw_rate
+        
+        # جهت پرتاب: جلو و کمی بالا
+        direction = camera.forward + Vec3(0, 0.3, 0)
+        direction = direction.normalized()
+        
+        # موقعیت شروع (دست بازیکن)
+        spawn_pos = camera.world_position + direction * 1.5
+        
+        # ساخت نارنجک
+        grenade = Grenade(
+            position=spawn_pos,
+            direction=direction
+        )
+        
+        print(f'💣 نارنجک پرتاب شد! باقی‌مانده: {self.grenades}')
+    
+    def update(self):
+        if self.throw_cooldown > 0:
+            self.throw_cooldown -= time.dt
+    
+    def add_grenades(self, amount):
+        self.grenades = min(self.grenades + amount, self.max_grenades)
+
+
+# ============================================================
+# ساخت سیستم‌ها
+# ============================================================
+grenade_system = PlayerGrenadeSystem()
+
+
+# ============================================================
+# تست: ساخت یه ماشین زرهی
+# ============================================================
+test_armored_car = ArmoredCar(
+    position=(25, 0, 25),
+    level=game_state['level']
+)
+
+
+# ============================================================
+# HUD با نارنجک
+# ============================================================
+def update_hud_full():
+    """HUD کامل با نارنجک"""
+    alive = len([e for e in game_state['enemies'] if e.enabled and not e.is_dying])
+    armored = len(game_state.get('armored_cars', []))
+    
+    hud.info_text.text = (
+        f'❤ جون: {player.health}/{PLAYER_MAX_HEALTH}\n'
+        f'🦺 جلیقه: {player.vest}/{VEST_MAX}\n'
+        f'💰 پول: {player.money:,}\n'
+        f'🎯 مرحله: {game_state["level"]}/40\n'
+        f'👥 دشمن‌ها: {alive}\n'
+        f'💣 نارنجک: {grenade_system.grenades}\n'
+        f'🚙 زرهی: {armored}'
+    )
+# ============================================================
+# بخش ۵: پیشرفت و پایان (پول، جلیقه، منو، ارتقا، یار، غول، ۴۰ مرحله، UI، پایان)
+# ============================================================
+
+# ============================================================
+# سیستم پول و پاداش
+# ============================================================
+class MoneySystem:
+    def __init__(self):
+        self.money = 0
+        self.total_earned = 0
+
+    def level_reward(self, level):
+        # مرحله ۱: ۱۰,۰۰۰ — مرحله ۴۰: ۱۰۰,۰۰۰ (رشد خطی)
+        if level >= 40:
+            reward = 100000
+        else:
+            reward = int(10000 + (90000 * (level - 1) / 39))
+        return reward
+
+    def add(self, amount):
+        self.money += amount
+        self.total_earned += amount
+        player.money = self.money
+
+    def spend(self, amount):
+        if self.money >= amount:
+            self.money -= amount
+            player.money = self.money
+            return True
+        return False
+
+    def complete_level(self, level):
+        reward = self.level_reward(level)
+        self.add(reward)
+        print(f'💰 پاداش مرحله {level}: {reward:,} (کل: {self.money:,})')
+        return reward
+
+
+money_system = MoneySystem()
+
+
+# ============================================================
+# جلیقه
+# ============================================================
+class VestSystem:
+    def __init__(self):
+        self.vests = 0
+        self.max_vests = 80
+        self.price_per_pack = 3000
+        self.per_pack = 5
+
+    def buy_pack(self):
+        if self.vests >= self.max_vests:
+            print('❌ جلیقه‌ات پره!')
+            return False
+        if not money_system.spend(self.price_per_pack):
+            print('❌ پول کافی نداری!')
+            return False
+        self.vests = min(self.vests + self.per_pack, self.max_vests)
+        player.vest = self.vests
+        print(f'🦺 جلیقه: {self.vests}/{self.max_vests}')
+        return True
+
+    def take_hit(self, damage_to_vest):
+        # دمیج روی جلیقه ۲ برابر — ولی چون ۸۰ تا داری ضعیفه
+        if self.vests > 0:
+            self.vests = max(0, self.vests - damage_to_vest)
+            player.vest = self.vests
+            return True
+        return False
+
+    def add(self, amount):
+        self.vests = min(self.vests + amount, self.max_vests)
+        player.vest = self.vests
+
+
+vest_system = VestSystem()
+
+
+# ============================================================
+# ارتقای سلاح
+# ============================================================
+class UpgradeSystem:
+    def __init__(self):
+        self.upgrades = {}  # {weapon_name: {'scope': 0, 'mag': 0, 'range': 0, 'damage': 0}}
+        self.max_level = 5
+        self.costs = {
+            'scope':  [2000, 4000, 8000, 15000, 25000],
+            'mag':    [1500, 3000, 6000, 12000, 20000],
+            'range':  [1000, 2500, 5000, 10000, 18000],
+            'damage': [3000, 6000, 12000, 22000, 40000],
+        }
+
+    def get_upgrade(self, weapon_name):
+        if weapon_name not in self.upgrades:
+            self.upgrades[weapon_name] = {'scope': 0, 'mag': 0, 'range': 0, 'damage': 0}
+        return self.upgrades[weapon_name]
+
+    def upgrade(self, weapon_name, kind):
+        if kind not in self.costs:
+            return False
+        upg = self.get_upgrade(weapon_name)
+        current = upg[kind]
+        if current >= self.max_level:
+            print(f'❌ {kind} به حداکثر رسیده!')
+            return False
+        cost = self.costs[kind][current]
+        if not money_system.spend(cost):
+            print('❌ پول کافی نداری!')
+            return False
+        upg[kind] += 1
+        self.apply_to_weapon(weapon_name, kind)
+        print(f'🔧 {weapon_name} {kind} → سطح {upg[kind]}')
+        return True
+
+    def apply_to_weapon(self, weapon_name, kind):
+        for w in weapon_manager.weapons:
+            if w.weapon_name == weapon_name:
+                upg = self.get_upgrade(weapon_name)
+                if kind == 'scope':
+                    w.zoom_level = max(10, w.zoom_level - upg['scope'] * 5)
+                elif kind == 'mag':
+                    w.max_ammo = int(w.max_ammo * (1 + upg['mag'] * 0.2))
+                elif kind == 'range':
+                    w.range_bonus = upg['range'] * 10
+                elif kind == 'damage':
+                    w.damage = int(w.damage * (1 + upg['damage'] * 0.25))
+
+    def get_cost(self, weapon_name, kind):
+        upg = self.get_upgrade(weapon_name)
+        current = upg[kind]
+        if current >= self.max_level:
+            return None
+        return self.costs[kind][current]
+
+
+upgrade_system = UpgradeSystem()
+
+
+# ============================================================
+# یار (قیافه‌ی واقعی انسان)
+# ============================================================
+class Ally(Entity):
+    def __init__(self, position=(0, 0, 0), level=1):
+        super().__init__(position=position, collider='box')
+        self.max_health = 5 + level // 2
+        self.health = self.max_health
+        self.speed = 3
+        self.attack_range = 20
+        self.fire_cooldown = random.uniform(1, 2)
+        self.fire_rate = 1.2
+        self.damage = 2
+        self.is_dying = False
+        self.death_time = 0
+        self._build_realistic_body()
+        game_state['allies'].append(self)
+
+    def _build_realistic_body(self):
+        # بدن
+        self.body = Entity(parent=self, model='cube', color=color.rgb(60, 100, 180),
+                           scale=(0.7, 1.0, 0.4), position=(0, 0.5, 0))
+        # سر
+        self.head = Entity(parent=self, model='sphere', color=COLOR_SKIN,
+                           scale=0.38, position=(0, 1.3, 0))
+        # چشم چپ
+        self.eye_l_white = Entity(parent=self, model='sphere', color=color.white,
+                                  scale=0.1, position=(-0.09, 1.33, 0.17))
+        self.eye_l_pupil = Entity(parent=self, model='sphere', color=color.black,
+                                  scale=0.05, position=(-0.09, 1.33, 0.21))
+        # چشم راست
+        self.eye_r_white = Entity(parent=self, model='sphere', color=color.white,
+                                  scale=0.1, position=(0.09, 1.33, 0.17))
+        self.eye_r_pupil = Entity(parent=self, model='sphere', color=color.black,
+                                  scale=0.05, position=(0.09, 1.33, 0.21))
+        # ابرو چپ
+        self.brow_l = Entity(parent=self, model='cube', color=color.rgb(60, 30, 10),
+                             scale=(0.11, 0.02, 0.02), position=(-0.09, 1.42, 0.19))
+        # ابرو راست
+        self.brow_r = Entity(parent=self, model='cube', color=color.rgb(60, 30, 10),
+                             scale=(0.11, 0.02, 0.02), position=(0.09, 1.42, 0.19))
+        # گوش چپ
+        self.ear_l = Entity(parent=self, model='sphere', color=COLOR_SKIN,
+                            scale=0.09, position=(-0.2, 1.3, 0))
+        # گوش راست
+        self.ear_r = Entity(parent=self, model='sphere', color=COLOR_SKIN,
+                            scale=0.09, position=(0.2, 1.3, 0))
+        # دماغ
+        self.nose = Entity(parent=self, model='sphere', color=COLOR_SKIN,
+                           scale=0.06, position=(0, 1.3, 0.22))
+        # دهن
+        self.mouth = Entity(parent=self, model='cube', color=color.rgb(150, 50, 50),
+                            scale=(0.12, 0.02, 0.02), position=(0, 1.22, 0.2))
+        # شلوار
+        self.pants = Entity(parent=self, model='cube', color=color.rgb(40, 40, 80),
+                            scale=(0.65, 0.6, 0.4), position=(0, -0.15, 0))
+        # پوتین
+        self.boot_l = Entity(parent=self, model='cube', color=color.rgb(40, 30, 20),
+                             scale=(0.22, 0.18, 0.4), position=(-0.18, -0.55, 0))
+        self.boot_r = Entity(parent=self, model='cube', color=color.rgb(40, 30, 20),
+                             scale=(0.22, 0.18, 0.4), position=(0.18, -0.55, 0))
+        # دست‌ها
+        self.arm_l = Entity(parent=self, model='sphere', color=COLOR_SKIN,
+                            scale=0.18, position=(-0.45, 0.7, 0))
+        self.arm_r = Entity(parent=self, model='sphere', color=COLOR_SKIN,
+                            scale=0.18, position=(0.45, 0.7, 0))
+        # اسلحه
+        self.gun = Entity(parent=self, model='cube', color=color.rgb(30, 30, 30),
+                          scale=(0.08, 0.08, 0.55), position=(0.45, 0.7, 0.3))
+
+    def update(self):
+        if self.is_dying:
+            self.death_time += time.dt
+            if self.death_time < 0.8:
+                self.rotation_x = -90 * (self.death_time / 0.8)
+            elif self.death_time > 1.5:
+                destroy(self)
+                if self in game_state['allies']:
+                    game_state['allies'].remove(self)
+            return
+        if game_state['game_lost'] or game_state['game_won']:
+            return
+        # پیدا کردن نزدیک‌ترین دشمن
+        target = None
+        min_dist = 999
+        for e in game_state['enemies']:
+            if e.enabled and not e.is_dying:
+                d = distance(self, e)
+                if d < min_dist:
+                    min_dist = d
+                    target = e
+        if target:
+            dist = distance(self, target)
+            if dist > 8:
+                direction = (target.position - self.position).normalized()
+                direction.y = 0
+                self.position += direction * self.speed * time.dt
+            self.look_at(Vec3(target.x, self.y, target.z))
+            if dist < self.attack_range:
+                self.fire_cooldown -= time.dt
+                if self.fire_cooldown <= 0:
+                    self.fire_cooldown = self.fire_rate
+                    if random.random() < 0.7:
+                        target.take_damage(self.damage)
+
+    def take_damage(self, amount):
+        if self.is_dying:
+            return
+        self.health -= amount
+        self.body.color = color.red
+        invoke(setattr, self.body, 'color', color.rgb(60, 100, 180), delay=0.1)
+        if self.health <= 0:
+            self.is_dying = True
+
+
+# ============================================================
+# غول
+# ============================================================
+class Boss(Entity):
+    def __init__(self, position=(0, 0, 0), level=5):
+        super().__init__(position=position, collider='box')
+        self.level = level
+        self.is_final = (level == 40)
+        self.name = 'جعفر طیاره' if self.is_final else f'غول مرحله {level}'
+        self.max_health = 30 + level * 5
+        self.health = self.max_health
+        self.speed = 1.2 + level * 0.03
+        self.attack_range = 25
+        self.fire_cooldown = 1.0
+        self.fire_rate = 0.8
+        self.damage_vest = 10
+        self.damage_health = 2
+        self.is_dying = False
+        self.death_time = 0
+        self._build_boss_body()
+        game_state['bosses'].append(self)
+
+    def _build_boss_body(self):
+        scale_mult = 2.0 if self.is_final else 1.6
+        boss_color = color.rgb(120, 30, 30) if self.is_final else color.rgb(80, 40, 20)
+        # بدن بزرگ
+        self.body = Entity(parent=self, model='cube', color=boss_color,
+                           scale=(1.2 * scale_mult, 1.5 * scale_mult, 0.7 * scale_mult),
+                           position=(0, 1.0 * scale_mult, 0))
+        # سر
+        self.head = Entity(parent=self, model='sphere', color=color.rgb(200, 150, 120),
+                           scale=0.7 * scale_mult, position=(0, 2.2 * scale_mult, 0))
+        # چشم‌های قرمز
+        self.eye_l = Entity(parent=self, model='sphere', color=color.red,
+                            scale=0.15, position=(-0.2, 2.3 * scale_mult, 0.35))
+        self.eye_r = Entity(parent=self, model='sphere', color=color.red,
+                            scale=0.15, position=(0.2, 2.3 * scale_mult, 0.35))
+        # شاخ
+        self.horn_l = Entity(parent=self, model='cube', color=color.black,
+                             scale=(0.1, 0.5, 0.1), position=(-0.3, 2.8 * scale_mult, 0))
+        self.horn_r = Entity(parent=self, model='cube', color=color.black,
+                             scale=(0.1, 0.5, 0.1), position=(0.3, 2.8 * scale_mult, 0))
+        # پاها
+        self.leg_l = Entity(parent=self, model='cube', color=color.rgb(40, 20, 10),
+                            scale=(0.5, 1.0 * scale_mult, 0.5), position=(-0.4, 0.1, 0))
+        self.leg_r = Entity(parent=self, model='cube', color=color.rgb(40, 20, 10),
+                            scale=(0.5, 1.0 * scale_mult, 0.5), position=(0.4, 0.1, 0))
+        # دست‌ها
+        self.arm_l = Entity(parent=self, model='sphere', color=color.rgb(200, 150, 120),
+                            scale=0.35 * scale_mult, position=(-0.9 * scale_mult, 1.3 * scale_mult, 0))
+        self.arm_r = Entity(parent=self, model='sphere', color=color.rgb(200, 150, 120),
+                            scale=0.35 * scale_mult, position=(0.9 * scale_mult, 1.3 * scale_mult, 0))
+        # اسلحه‌ی بزرگ (جعفر طیاره: RPG بزرگ)
+        self.weapon = Entity(parent=self, model='cube', color=color.rgb(20, 20, 20),
+                             scale=(0.2, 0.2, 1.5), position=(0.9 * scale_mult, 1.3 * scale_mult, 0.5))
+        # بال برای جعفر طیاره
+        if self.is_final:
+            self.wing_l = Entity(parent=self, model='cube', color=color.rgb(180, 180, 180),
+                                 scale=(2.5, 0.1, 1.0), position=(-1.8, 1.5, -0.3))
+            self.wing_r = Entity(parent=self, model='cube', color=color.rgb(180, 180, 180),
+                                 scale=(2.5, 0.1, 1.0), position=(1.8, 1.5, -0.3))
+
+    def update(self):
+        if self.is_dying:
+            self.death_time += time.dt
+            if self.death_time < 1.2:
+                self.rotation_x = -90 * (self.death_time / 1.2)
+            elif self.death_time > 2.5:
+                if self.is_final:
+                    trigger_game_win()
+                destroy(self)
+                if self in game_state['bosses']:
+                    game_state['bosses'].remove(self)
+            return
+        if game_state['game_lost'] or game_state['game_won']:
+            return
+        # پرواز برای جعفر طیاره
+        if self.is_final:
+            self.y = 6 + math.sin(time.time() * 1.5) * 1.5
+        dist = distance(self, player)
+        if dist > 6:
+            direction = (player.position - self.position).normalized()
+            direction.y = 0
+            self.position += direction * self.speed * time.dt
+        self.look_at(Vec3(player.x, self.y, player.z))
+        if dist < self.attack_range:
+            self.fire_cooldown -= time.dt
+            if self.fire_cooldown <= 0:
+                self.fire_cooldown = self.fire_rate
+                if random.random() < 0.8:
+                    player.take_damage(damage_to_vest=self.damage_vest,
+                                       damage_to_health=self.damage_health)
+
+    def take_damage(self, amount):
+        if self.is_dying:
+            return
+        self.health -= amount
+        self.body.color = color.red
+        invoke(setattr, self.body, 'color',
+               color.rgb(120, 30, 30) if self.is_final else color.rgb(80, 40, 20),
+               delay=0.1)
+        if self.health <= 0:
+            self.is_dying = True
+
+
+# ============================================================
+# ۴۰ مرحله
+# ============================================================
+class LevelManager:
+    def __init__(self):
+        self.current_level = 1
+        self.total_levels = 40
+        self.boss_levels = [5, 10, 15, 20, 25, 30, 35, 40]
+
+    def enemy_count_for_level(self, level):
+        return 3 + int(level * 1.5)
+
+    def is_boss_level(self, level):
+        return level in self.boss_levels
+
+    def start_level(self, level):
+        self.current_level = level
+        game_state['level'] = level
+        # پاکسازی دشمن‌ها
+        for e in list(game_state['enemies']):
+            destroy(e)
+        game_state['enemies'].clear()
+        for b in list(game_state['bosses']):
+            destroy(b)
+        game_state['bosses'].clear()
+        # موج دشمن
+        count = self.enemy_count_for_level(level)
+        enemy_spawner.spawn_wave(level=level, count=count)
+        # غول
+        if self.is_boss_level(level):
+            Boss(position=(player.x + 30, 0, player.z + 30), level=level)
+        # یارها (از مرحله ۳ به بعد)
+        if level >= 3:
+            ally_count = min(5, (level - 2) // 2 + 1)
+            for _ in range(ally_count):
+                angle = random.uniform(0, 2 * math.pi)
+                Ally(position=(player.x + math.cos(angle) * 5, 1,
+                               player.z + math.sin(angle) * 5), level=level)
+        print(f'🎯 مرحله {level} شروع شد!')
+
+    def complete_level(self):
+        money_system.complete_level(self.current_level)
+        if self.current_level >= self.total_levels:
+            trigger_game_win()
+        else:
+            self.current_level += 1
+            self.start_level(self.current_level)
+
+
+level_manager = LevelManager()
+
+
+# ============================================================
+# منو و UI
+# ============================================================
+class Menu:
+    def __init__(self):
+        self.is_open = False
+        self.panel = None
+        self.buttons = []
+
+    def open(self):
+        if self.is_open:
+            return
+        self.is_open = True
+        mouse.locked = False
+        self.panel = Entity(parent=camera.ui, model='quad',
+                            color=color.rgba(0, 0, 0, 0.85), scale=(1.5, 1))
+        Text(parent=self.panel, text='⚙ منو', origin=(0, 0),
+             position=(0, 0.4), scale=2, color=color.white)
+        # دکمه‌ی ارتقا سلاح
+        self._make_button('ارتقای سلاح', 0.25, self.show_upgrades)
+        # دکمه‌ی خرید جلیقه
+        self._make_button('خرید جلیقه (۳۰۰۰ = ۵)', 0.1, self.buy_vest)
+        # دکمه‌ی بستن
+        self._make_button('بستن', -0.35, self.close)
+
+    def _make_button(self, label, y, callback):
+        btn = Button(parent=self.panel, text=label, scale=(0.6, 0.08),
+                     position=(0, y), color=color.rgb(60, 60, 80),
+                     highlight_color=color.rgb(100, 100, 140))
+        btn.on_click = callback
+        self.buttons.append(btn)
+
+    def show_upgrades(self):
+        print('🔧 منوی ارتقا: سلاح رو انتخاب کن (۱ تا ۷)')
+        for i, w in enumerate(weapon_manager.weapons):
+            upg = upgrade_system.get_upgrade(w.weapon_name)
+            print(f'  {i+1}. {w.weapon_name} — دوربین:{upg["scope"]} '
+                  f'خشاب:{upg["mag"]} برد:{upg["range"]} دمیج:{upg["damage"]}')
+        print('برای ارتقا: U + شماره سلاح + نوع (scope/mag/range/damage)')
+
+    def buy_vest(self):
+        vest_system.buy_pack()
+
+    def close(self):
+        self.is_open = False
+        mouse.locked = True
+        if self.panel:
+            destroy(self.panel)
+            self.panel = None
+        self.buttons.clear()
+
+
+menu = Menu()
+
+
+# ============================================================
+# UI موبایل (جوی‌استیک + دکمه‌ها)
+# ============================================================
+class MobileUI:
+    def __init__(self):
+        self.joy_base = Entity(parent=camera.ui, model='circle',
+                               color=color.rgba(255, 255, 255, 0.3),
+                               scale=0.15, position=(-0.7, -0.35))
+        self.joy_stick = Entity(parent=camera.ui, model='circle',
+                                color=color.rgba(255, 255, 255, 0.6),
+                                scale=0.07, position=(-0.7, -0.35))
+        self.fire_btn = Button(parent=camera.ui, text='🔥',
+                               scale=(0.12, 0.12), position=(0.75, -0.35),
+                               color=color.rgba(255, 0, 0, 0.7))
+        self.fire_btn.on_click = lambda: weapon_manager.current.shoot()
+        self.reload_btn = Button(parent=camera.ui, text='🔄',
+                                 scale=(0.1, 0.1), position=(0.6, -0.15),
+                                 color=color.rgba(0, 100, 255, 0.7))
+        self.reload_btn.on_click = lambda: weapon_manager.reload_current()
+        self.grenade_btn = Button(parent=camera.ui, text='💣',
+                                  scale=(0.1, 0.1), position=(0.85, -0.15),
+                                  color=color.rgba(0, 200, 0, 0.7))
+        self.grenade_btn.on_click = lambda: grenade_system.throw()
+        self.menu_btn = Button(parent=camera.ui, text='⚙',
+                               scale=(0.08, 0.08), position=(0.9, 0.45),
+                               color=color.rgba(100, 100, 100, 0.7))
+        self.menu_btn.on_click = lambda: menu.open()
+        # انتخاب سلاح (نوار پایین)
+        self.weapon_btns = []
+        for i, w in enumerate(weapon_manager.weapons):
+            b = Button(parent=camera.ui, text=w.weapon_name,
+                       scale=(0.1, 0.05),
+                       position=(-0.4 + i * 0.13, 0.45),
+                       color=color.rgba(50, 50, 80, 0.7))
+            b.on_click = (lambda idx=i: (lambda: weapon_manager.switch_to(idx)))()
+            self.weapon_btns.append(b)
+
+    def update(self):
+        # جوی‌استیک لمسی
+        if held_keys['left mouse']:
+            mpos = mouse.position
+            if distance_2d(mpos, self.joy_base.position) < 0.1:
+                self.joy_stick.position = Vec2(
+                    self.joy_base.x + (mpos[0] - self.joy_base.x) * 0.7,
+                    self.joy_base.y + (mpos[1] - self.joy_base.y) * 0.7
+                )
+                # حرکت بازیکن
+                dx = self.joy_stick.x - self.joy_base.x
+                dy = self.joy_stick.y - self.joy_base.y
+                player.position += Vec3(dx * 30 * time.dt, 0, dy * 30 * time.dt)
+        else:
+            self.joy_stick.position = self.joy_base.position
+
+
+def distance_2d(a, b):
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+
+mobile_ui = MobileUI()
+
+
+# ============================================================
+# پایان بازی
+# ============================================================
+def trigger_game_win():
+    if game_state['game_won']:
+        return
+    game_state['game_won'] = True
+    invoke(show_end_message, delay=1.0)
+
+
+def show_end_message():
+    Text(text='🏆 بردی!', origin=(0, 0), position=(0, 0.15),
+         scale=4, color=color.yellow, background=True)
+    Text(text=END_MESSAGE, origin=(0, 0), position=(0, -0.05),
+         scale=2.5, color=color.white, background=True)
+    print('🏁 پایان بازی')
+
+
+END_MESSAGE = 'فعلاً تا قسمت‌های بعدی منتظر باشید'
+
+
+# ============================================================
+# به‌روزرسانی نهایی
+# ============================================================
+def update():
+    update_hud_full()
+    weapon_manager.update()
+    grenade_system.update()
+    mobile_ui.update()
+    if menu.is_open:
+        return
+    if game_state['game_lost'] or game_state['game_won']:
+        return
+    alive = [e for e in game_state['enemies'] if e.enabled and not e.is_dying]
+    bosses = [b for b in game_state['bosses'] if b.enabled and not b.is_dying]
+    if len(alive) == 0 and len(bosses) == 0:
+        if not hasattr(update, '_waiting'):
+            update._waiting = True
+            invoke(level_manager.complete_level, delay=2.0)
+
+
+def input(key):
+    if key == 'escape':
+        application.quit()
+    if key == 'c':
+        player.crouch()
+    if key == 'c up':
+        player.stand_up()
+    if key == 'g':
+        grenade_system.throw()
+    if key == '1': weapon_manager.switch_to(0)
+    if key == '2': weapon_manager.switch_to(1)
+    if key == '3': weapon_manager.switch_to(2)
+    if key == '4': weapon_manager.switch_to(3)
+    if key == '5': weapon_manager.switch_to(4)
+    if key == '6': weapon_manager.switch_to(5)
+    if key == '7': weapon_manager.switch_to(6)
+    if key == 'r':
+        weapon_manager.reload_current()
+    if key == 'scroll up':
+        weapon_manager.prev_weapon()
+    if key == 'scroll down':
+        weapon_manager.next_weapon()
+    if key == 'tab':
+        menu.open()
+    if key == 'h':
+        player.take_damage(damage_to_vest=4, damage_to_health=1)
+    if key == 'm':
+        money_system.add(5000)
+    if key == 'v':
+        vest_system.add(5)
+
+
+# ============================================================
+# شروع
+# ============================================================
+level_manager.start_level(1)
