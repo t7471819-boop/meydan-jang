@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>FPS</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;overflow:hidden;background:#000;font-family:monospace;touch-action:none;user-select:none}
+@media (orientation:portrait) and (max-width:1100px){#rotateO{display:flex}#mainMenu,#levelMenu,#gameContainer,#settingsMenu,#shopMenu,#pauseMenu,#vanContainer{display:none!important}}
+#rotateO{position:fixed;inset:0;background:#0a0a15;color:#0f0;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:9999;font-size:22px;text-align:center;padding:20px}
+#rotateO .icon{font-size:80px;margin-bottom:25px;animation:rot 2s infinite}
+@keyframes rot{0%,40%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
+#mainMenu{position:fixed;inset:0;z-index:8000;background:linear-gradient(135deg,#0a0a15,#1a1a3e);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;color:#0f0;padding:20px;gap:12px;overflow-y:auto}
+#mainMenu.hide{display:none}
+#mainMenu h1{font-size:42px;margin:20px 0 10px;text-shadow:0 0 20px #0f0;letter-spacing:6px}
+#moneyDisplay{color:#fc0;font-size:16px;margin:10px 0}
+.btn-main{padding:13px 50px;font-size:19px;font-family:monospace;font-weight:bold;color:#0f0;background:transparent;border:3px solid #0f0;border-radius:10px;cursor:pointer;letter-spacing:3px;box-shadow:0 0 20px rgba(0,255,0,0.5);min-width:220px}
+.btn-main:active{background:#0f0;color:#000}
+.btn-gold{color:#fc0;border-color:#fc0}
+.btn-gold:active{background:#fc0;color:#000}
+#levelMenu,#settingsMenu,#shopMenu{position:fixed;inset:0;z-index:8000;background:linear-gradient(135deg,#0a0a15,#1a1a3e);display:none;flex-direction:column;align-items:center;justify-content:flex-start;color:#0f0;overflow-y:auto;padding:20px}
+#levelMenu.show,#settingsMenu.show,#shopMenu.show{display:flex}
+#levelMenu h1,#settingsMenu h1,#shopMenu h1{font-size:28px;margin:10px 0 6px;text-shadow:0 0 15px #0f0;letter-spacing:4px}
+#levelGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-width:760px;width:100%;padding-bottom:150px}
+.levelBtn{padding:12px 6px;font-size:13px;font-family:monospace;font-weight:bold;color:#0f0;background:rgba(0,60,0,0.4);border:2px solid #0f0;border-radius:10px;cursor:pointer;text-align:center}
+.levelBtn:active{transform:scale(0.95)}
+.levelBtn.locked{color:#666;border-color:#444;background:rgba(30,30,30,0.5);cursor:not-allowed}
+.levelBtn.locked::after{content:'🔒';display:block;font-size:16px;margin-top:3px}
+.levelBtn .levelName{font-size:10px;opacity:0.8;display:block;margin-top:2px}
+.levelBtn .stars{font-size:12px;margin-top:3px;color:#fc0}
+.levelBtn.boss{border-color:#f00;color:#f00;background:rgba(60,0,0,0.5)}
+.levelBtn.final{border-color:#ff00ff;color:#ff00ff;background:rgba(60,0,60,0.6)}
+#backBtn,#shopBackBtn,#settingsBackBtn{margin-top:20px;padding:10px 40px;font-size:16px;font-family:monospace;color:#f80;background:rgba(0,0,0,0.85);border:2px solid #f80;border-radius:8px;cursor:pointer}
+#shopTabs{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap;justify-content:center;max-width:700px}
+.shopTab{padding:8px 16px;font-size:14px;font-family:monospace;font-weight:bold;color:#0f0;background:rgba(0,60,0,0.4);border:2px solid #0f0;border-radius:8px;cursor:pointer}
+.shopTab.active{background:#0f0;color:#000}
+.shopItem{background:rgba(0,60,0,0.3);border:2px solid #fc0;border-radius:12px;padding:15px;margin:8px 0;max-width:600px;width:100%;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.shopItem.owned{border-color:#0f0;background:rgba(0,60,0,0.6)}
+.shopItem .info{flex:1;text-align:right;direction:rtl;font-size:14px;min-width:200px}
+.shopItem .info .title{font-size:16px;color:#fc0;font-weight:bold;margin-bottom:4px}
+.shopItem .info .desc{font-size:12px;opacity:0.85;line-height:1.5}
+.shopItem .price{color:#fc0;font-size:18px;font-weight:bold;white-space:nowrap}
+.buyBtn{padding:8px 20px;font-family:monospace;font-weight:bold;background:#fc0;color:#000;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.langBtn{padding:12px 40px;font-size:16px;font-family:monospace;font-weight:bold;color:#0f0;background:rgba(0,60,0,0.4);border:2px solid #0f0;border-radius:8px;cursor:pointer;min-width:200px;margin:5px}
+.langBtn.active{background:#0f0;color:#000}
+#loading{position:fixed;inset:0;background:#0a0a15;color:#0f0;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:9000;font-size:16px}
+#loading.show{display:flex}
+#loading .spinner{width:50px;height:50px;border:4px solid #0f044;border-top-color:#0f0;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+#vanContainer{position:fixed;inset:0;z-index:9500;display:none;background:#000}
+#vanContainer.show{display:block}
+#vanContainer canvas{display:block}
+#gameContainer{position:fixed;inset:0;display:none}
+#gameContainer.show{display:block}
+#crosshair{position:fixed;top:50%;left:50%;width:30px;height:30px;transform:translate(-50%,-50%);z-index:10;pointer-events:none}
+#crosshair .dot{position:absolute;top:50%;left:50%;width:6px;height:6px;background:#0f0;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 6px #0f0}
+#crosshair .ring{position:absolute;inset:0;border:2px solid rgba(0,255,0,0.5);border-radius:50%}
+#crosshair.locked .dot{background:#f00;width:10px;height:10px;box-shadow:0 0 10px #f00}
+#crosshair.locked .ring{border-color:#f00;border-width:3px}
+#sniperScope{position:fixed;inset:0;z-index:15;pointer-events:none;display:none}
+#sniperScope.show{display:block}
+#sniperScope .cross-h{position:absolute;top:50%;left:0;width:100%;height:2px;background:rgba(0,0,0,0.85);transform:translateY(-50%)}
+#sniperScope .cross-v{position:absolute;left:50%;top:0;width:2px;height:100%;background:rgba(0,0,0,0.85);transform:translateX(-50%)}
+#sniperScope .dot{position:absolute;top:50%;left:50%;width:6px;height:6px;background:#f00;border-radius:50%;transform:translate(-50%,-50%)}
+#lockTimer{position:fixed;top:52%;left:50%;transform:translate(-50%,0);color:#f80;font-size:14px;z-index:11;pointer-events:none;text-shadow:0 0 5px #000;display:none}
+#lockTimer.show{display:block}
+#timerHud{position:fixed;top:12px;left:50%;transform:translateX(-50%);color:#fc0;font-size:22px;font-weight:bold;z-index:10;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:6px 18px;border-radius:8px;border:2px solid #fc0;pointer-events:none}
+#timerHud.warning{color:#f44;border-color:#f44}
+#pauseBtn{position:fixed;top:12px;left:calc(50% + 90px);width:42px;height:42px;border-radius:50%;background:rgba(0,0,0,0.6);border:2px solid #fc0;color:#fc0;font-size:20px;font-weight:bold;cursor:pointer;z-index:25;display:flex;align-items:center;justify-content:center}
+.hud{position:fixed;color:#0f0;font-size:14px;z-index:10;text-shadow:0 0 5px #000;pointer-events:none}
+#hud{top:12px;left:12px;line-height:1.5;max-width:180px}
+#hpBar{width:160px;height:14px;border:2px solid #0f0;background:rgba(0,0,0,0.5);margin-bottom:4px;border-radius:4px;overflow:hidden}
+#hpFill{height:100%;background:linear-gradient(90deg,#f00,#ff0,#0f0);width:100%}
+#hpText{font-size:12px}
+#backpack{margin-top:4px;color:#fc0;font-size:11px}
+#vestIndicator{margin-top:4px;color:#4af;font-size:11px;display:none}
+#vestIndicator.on{display:block}
+#weaponUI{top:12px;right:160px;text-align:right;line-height:1.4;font-size:12px}
+#levelHud{top:115px;left:12px;font-size:12px;color:#fc0}
+#airStrikeHud{top:12px;left:195px;font-size:12px;color:#4ff}
+#reinforceHud{top:30px;left:195px;font-size:12px;color:#f4a}
+#slowHud{top:135px;left:12px;font-size:12px;color:#84f}
+#moneyHud{top:155px;left:12px;font-size:13px;color:#fc0;font-weight:bold}
+#radar{position:fixed;top:12px;right:12px;width:125px;height:125px;border-radius:50%;background:rgba(0,20,0,0.8);border:2px solid #0f0;z-index:10;pointer-events:none}
+#radarCanvas{width:100%;height:100%;border-radius:50%}
+#mobileControls{position:fixed;inset:0;z-index:20;pointer-events:none}
+#lookArea{position:absolute;inset:0;pointer-events:auto;z-index:1}
+#joyLeft{position:absolute;bottom:20px;left:20px;width:130px;height:130px;border-radius:50%;background:rgba(0,255,0,0.08);border:2px solid rgba(0,255,0,0.4);pointer-events:auto;touch-action:none;z-index:5}
+.joyKnob{position:absolute;top:50%;left:50%;width:55px;height:55px;border-radius:50%;background:rgba(0,255,0,0.35);border:2px solid #0f0;transform:translate(-50%,-50%)}
+#fireBtn{position:absolute;right:20px;bottom:20px;width:85px;height:85px;border-radius:50%;pointer-events:auto;background:radial-gradient(circle at 30% 30%,#ffdd44,#cc8800 50%,#664400);border:3px solid #ffcc00;display:flex;align-items:center;justify-content:center;z-index:15}
+#fireBtn.pressed{transform:scale(0.88)}
+#fireBtn svg{width:60%;height:60%}
+#rightButtons{position:absolute;inset:0;pointer-events:none;z-index:5}
+.actBtn{position:absolute;width:42px;height:42px;border-radius:50%;pointer-events:auto;color:#fff;font-size:8px;font-weight:bold;display:flex;align-items:center;justify-content:center;border:2px solid;z-index:5;text-align:center;padding:1px}
+#camBtn{right:165px;top:50px;background:rgba(255,150,50,0.5);border-color:#fa0}
+#knifeBtn{right:165px;top:100px;background:rgba(200,200,200,0.5);border-color:#ccc}
+#grenadeBtn{right:165px;top:150px;background:rgba(80,255,80,0.5);border-color:#4f4}
+#smokeBtn{right:165px;top:200px;background:rgba(150,150,150,0.6);border-color:#999}
+#incendiaryBtn{right:165px;top:250px;background:rgba(255,100,50,0.6);border-color:#f63}
+#reinforceBtn{right:215px;top:50px;background:rgba(255,100,200,0.5);border-color:#f4a}
+#airBtn{right:215px;top:100px;background:rgba(100,200,255,0.5);border-color:#4cf;font-size:16px}
+#slowBtn{right:215px;top:150px;background:rgba(150,100,255,0.5);border-color:#a8f}
+#crouchBtn{right:215px;top:200px;background:rgba(100,255,255,0.5);border-color:#0ff}
+#jumpBtn{right:215px;top:250px;background:rgba(255,255,100,0.5);border-color:#ff0}
+#zoomBtn{right:265px;top:50px;background:rgba(120,60,255,0.5);border-color:#84f}
+#reloadBtn{right:265px;top:100px;background:rgba(60,120,255,0.5);border-color:#48f}
+#runBtn{right:265px;top:150px;background:rgba(50,255,100,0.5);border-color:#3f6}
+#runBtn.active{background:rgba(50,255,100,0.9)}
+#weaponButtons{position:absolute;left:165px;bottom:20px;display:flex;flex-direction:row;gap:5px;pointer-events:auto;z-index:5;flex-wrap:wrap;max-width:380px}
+.wbtn{width:36px;height:56px;border-radius:8px;background:rgba(255,200,60,0.3);border:2px solid #fc0;color:#fff;font-weight:bold;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;text-align:center;padding:3px 1px}
+.wbtn.active{background:rgba(255,200,60,0.85)}
+.wbtn .wname{font-size:10px;writing-mode:vertical-rl;text-orientation:upright;letter-spacing:1px;direction:rtl;max-height:48px;overflow:hidden}
+#hurtFlash{position:fixed;inset:0;pointer-events:none;z-index:30;background:radial-gradient(ellipse at center,transparent 30%,rgba(255,0,0,0.7));opacity:0}
+#hurtFlash.on{opacity:1}
+#slowOverlay{position:fixed;inset:0;pointer-events:none;z-index:29;background:radial-gradient(circle at center,transparent 40%,rgba(120,80,255,0.4));display:none}
+#slowOverlay.on{display:block}
+#levelComplete,#gameOver{position:fixed;inset:0;z-index:8500;background:rgba(0,0,0,0.92);display:none;flex-direction:column;align-items:center;justify-content:center;font-family:monospace;padding:20px;overflow-y:auto}
+#levelComplete.show,#gameOver.show{display:flex}
+#levelComplete{color:#0f0}
+#gameOver{color:#f44}
+#levelComplete h2,#gameOver h2{font-size:32px;margin:0 0 15px;text-shadow:0 0 20px currentColor;text-align:center}
+#levelComplete .starsDisplay{font-size:55px;color:#fc0;letter-spacing:10px;margin:15px 0}
+#levelComplete button,#gameOver button{padding:12px 40px;font-size:16px;font-family:monospace;font-weight:bold;color:inherit;background:transparent;border:3px solid currentColor;border-radius:10px;cursor:pointer;margin:6px}
+#bonusDisplay{color:#4ff;font-size:14px;margin:10px 0;text-align:center;line-height:1.6}
+#moneyEarned{color:#fc0;font-size:20px;margin:10px 0}
+#pauseMenu{position:fixed;inset:0;z-index:8600;background:rgba(0,0,0,0.92);display:none;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:15px;font-family:monospace}
+#pauseMenu.show{display:flex}
+#pauseMenu h2{color:#fc0;font-size:28px;margin:0 0 20px 0}
+</style>
+</head>
+<body>
+<div id="rotateO"><div class="icon">📱</div><div>گوشی را افقی بگیرید</div></div>
+<div id="mainMenu">
+<h1>FPS</h1>
+<div id="moneyDisplay">💰 <span id="menuMoney">0</span></div>
+<button class="btn-main" id="startBtn">شروع بازی</button>
+<button class="btn-main btn-gold" id="shopBtn">🛒 فروشگاه</button>
+<button class="btn-main" id="settingsBtn">⚙️ تنظیمات</button>
+</div>
+<div id="shopMenu">
+<h1>🛒 فروشگاه</h1>
+<div style="color:#fc0;font-size:20px;margin:10px 0;">💰 <span id="shopMoney">0</span></div>
+<div id="shopTabs">
+<div class="shopTab active" data-tab="weapons">🔫 سلاح‌ها</div>
+<div class="shopTab" data-tab="attachments">🔧 قطعات</div>
+<div class="shopTab" data-tab="vest">🛡️ جلیقه</div>
+<div class="shopTab" data-tab="upgrades">⬆️ ارتقاء</div>
+</div>
+<div id="shopItems"></div>
+<button id="shopBackBtn">بازگشت</button>
+</div>
+<div id="settingsMenu">
+<h1>تنظیمات</h1>
+<div style="opacity:0.7;font-size:13px;">زبان:</div>
+<button class="langBtn active" id="langFaBtn">فارسی</button>
+<button class="langBtn" id="langEnBtn">English</button>
+<button id="settingsBackBtn">بازگشت</button>
+</div>
+<div id="levelMenu">
+<h1>مرحله‌ها</h1>
+<div id="levelGrid"></div>
+<button id="backBtn">بازگشت</button>
+</div>
+<div id="loading"><div class="spinner"></div><div>در حال بارگذاری...</div></div>
+<div id="vanContainer"></div>
+<div id="gameContainer">
+<div id="sniperScope"><div class="cross-h"></div><div class="cross-v"></div><div class="dot"></div></div>
+<div id="crosshair"><div class="ring"></div><div class="dot"></div></div>
+<div id="lockTimer">...</div>
+<div id="timerHud">05:00</div>
+<button id="pauseBtn">☰</button>
+<div class="hud" id="hud">
+<div id="hpBar"><div id="hpFill"></div></div>
+<div id="hpText">جان: <span id="hp">20</span>/20 | کشته: <span id="kills">0</span></div>
+<div id="backpack">کوله: <span id="bpAmmo">0</span></div>
+<div id="vestIndicator">🛡️ جلیقه (<span id="vestHp">0</span>)</div>
+</div>
+<div class="hud" id="levelHud">مرحله: <span id="levelNum">1</span>/20 | دشمن: <span id="enemiesLeft">0</span></div>
+<div class="hud" id="airStrikeHud">هوایی: <span id="airLeft">2</span></div>
+<div class="hud" id="reinforceHud">کمکی: <span id="reinforceLeft">3</span></div>
+<div class="hud" id="slowHud">آهسته: <span id="slowStatus">آماده</span></div>
+<div class="hud" id="moneyHud">💰 <span id="gameMoney">0</span></div>
+<div class="hud" id="weaponUI"><div id="weaponName">کلاشنیکوف</div><div>خشاب: <span id="ammo">25</span>/<span id="mag">25</span></div><div>ذخیره: <span id="reserve">90</span></div></div>
+<div id="radar"><canvas id="radarCanvas" width="260" height="260"></canvas></div>
+<div id="hurtFlash"></div>
+<div id="slowOverlay"></div>
+<div id="mobileControls">
+<div id="lookArea"></div>
+<div id="joyLeft"><div class="joyKnob" id="knobLeft"></div></div>
+<button id="fireBtn"><svg viewBox="0 0 100 100"><ellipse cx="50" cy="50" rx="12" ry="35" fill="#fff" opacity="0.9"/></svg></button>
+<div id="rightButtons">
+<button class="actBtn" id="camBtn">دوربین</button>
+<button class="actBtn" id="knifeBtn">چاقو</button>
+<button class="actBtn" id="grenadeBtn">نارنجک</button>
+<button class="actBtn" id="smokeBtn">دودزا</button>
+<button class="actBtn" id="incendiaryBtn">🔥</button>
+<button class="actBtn" id="reinforceBtn">کمکی</button>
+<button class="actBtn" id="airBtn">✈️</button>
+<button class="actBtn" id="slowBtn">آهسته</button>
+<button class="actBtn" id="crouchBtn">خواب</button>
+<button class="actBtn" id="jumpBtn">پرش</button>
+<button class="actBtn" id="zoomBtn">زوم</button>
+<button class="actBtn" id="reloadBtn">خشاب</button>
+<button class="actBtn" id="runBtn">دویدن</button>
+</div>
+<div id="weaponButtons"></div>
+</div>
+</div>
+<div id="levelComplete">
+<h2>مرحله تمام شد!</h2>
+<div style="font-size:15px;color:#fff;">مرحله <span id="completedLevel">1</span></div>
+<div class="starsDisplay" id="starsDisplay">⭐⭐⭐</div>
+<div id="moneyEarned"></div>
+<div id="bonusDisplay"></div>
+<button id="nextLevelBtn">مرحله بعدی</button>
+<button id="backToMenuBtn">بازگشت به منو</button>
+</div>
+<div id="gameOver">
+<h2 id="goTitle">باختی!</h2>
+<div style="font-size:16px;margin-bottom:20px;color:#fff;">دوباره تلاش کن</div>
+<button id="retryBtn">تلاش دوباره</button>
+<button id="backToMenu2Btn">بازگشت به منو</button>
+</div>
+<div id="pauseMenu">
+<h2>⏸️ توقف</h2>
+<button class="btn-main" id="resumeBtn">ادامه بازی</button>
+<button class="btn-main btn-gold" id="pauseShopBtn">🛒 فروشگاه</button>
+<button class="btn-main" id="pauseMenuBtn">🏠 منوی اصلی</button>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+"use strict";
+var LANG="fa";
+var T={fa:{rifle:"کلاشنیکوف",smg:"رگبار",shotgun:"ساچمه‌زن",sniper:"اسنایپ",pistol:"کلت",rpg:"آرپی‌جی",knife:"چاقو",boss:"غول",finalBoss:"جعفر طیار",fields:["دشت","جنگل","کوهستان","دشت جنگلی","میدان جنگ"],back:"بازگشت",nextLevel:"مرحله بعدی",backToMenu:"بازگشت به منو",retry:"تلاش دوباره",youLost:"باختی!",levelComplete:"مرحله تمام شد!"},en:{rifle:"Rifle",smg:"SMG",shotgun:"Shotgun",sniper:"Sniper",pistol:"Pistol",rpg:"RPG",knife:"Knife",boss:"Boss",finalBoss:"Jafar",fields:["Plain","Forest","Mountain","Forest Plain","War Zone"],back:"Back",nextLevel:"Next",backToMenu:"Menu",retry:"Retry",youLost:"You Lost!",levelComplete:"Level Complete!"}};
+var LEVELS=[];
+var WEATHERS=["clear","clear","sunset","clear","cloudy","clear","sunset","cloudy","clear","foggy"];
+for(var i=1;i<=20;i++){
+  var isFinal=(i===20);
+  var isBoss=(i%5===0);
+  var bossTier=Math.floor(i/5);
+  LEVELS.push({num:i,bossTier:bossTier,isFinal:isFinal,weather:WEATHERS[(i-1)%10],enemies:(isBoss||isFinal)?0:(4+i*2),gunners:(isBoss||isFinal)?0:Math.floor(i/1.5),rocks:4+i,trees:10+i*2,terrain:0.3+(i%5)*0.15,bunkers:3+Math.floor(i/2),boss:isBoss||isFinal,bossHp:isFinal?10000000:(isBoss?100000*bossTier*bossTier:0),bossScale:isFinal?3:(isBoss?1+(bossTier-1)*0.5:0),reward:50+i*25+(isBoss?200:0)+(isFinal?500:0),timeLimit:300});
+}
+var SHOP_VESTS=[{id:"vest1",name:"جلیقه سبک",desc:"۵۰ واحد",price:100,vestHp:50},{id:"vest2",name:"جلیقه متوسط",desc:"۱۰۰ واحد",price:200,vestHp:100},{id:"vest3",name:"جلیقه سنگین",desc:"۲۰۰ واحد",price:350,vestHp:200},{id:"vest4",name:"جلیقه تاکتیکی",desc:"۳۰۰ واحد",price:500,vestHp:300},{id:"vest5",name:"جلیقه ویژه",desc:"۵۰۰ واحد",price:1000,vestHp:500}];
+var SHOP_ATTACHMENTS=[{id:"att_scope_rifle",weapon:"rifle",type:"scope",name:"دوربین کلاشنیکوف",desc:"زوم",price:300},{id:"att_silencer_rifle",weapon:"rifle",type:"silencer",name:"صدا خفه کن کلاشنیکوف",desc:"صدا کم",price:250},{id:"att_scope_sniper",weapon:"sniper",type:"scope",name:"دوربین اسنایپ",desc:"زوم",price:500},{id:"att_extmag_rifle",weapon:"rifle",type:"mag",add:20,name:"خشاب +۲۰",desc:"بیشتر",price:200},{id:"att_extmag_smg",weapon:"smg",type:"mag",add:30,name:"خشاب رگبار +۳۰",desc:"بیشتر",price:200}];
+var SHOP_UPGRADES=[{id:"up_rifle_dmg1",weapon:"rifle",type:"damage",mult:1.5,name:"کلاشنیکوف دمیج۱",desc:"×۱.۵",price:200},{id:"up_rifle_dmg2",weapon:"rifle",type:"damage",mult:2.0,name:"کلاشنیکوف دمیج۲",desc:"×۲",price:400},{id:"up_smg_dmg1",weapon:"smg",type:"damage",mult:1.5,name:"رگبار دمیج۱",desc:"×۱.۵",price:200},{id:"up_pistol_dmg1",weapon:"pistol",type:"damage",mult:1.6,name:"کلت دمیج",desc:"×۱.۶",price:150}];
+var UNLOCK_KEY="fps_unlocked_v13",STARS_KEY="fps_stars_v13",MONEY_KEY="fps_money_v13",SHOP_KEY="fps_shop_v13",UPGRADES_KEY="fps_upgrades_v13",ATTACH_KEY="fps_attach_v13";
+function getUnlocked(){return parseInt(localStorage.getItem(UNLOCK_KEY)||"1");}
+function setUnlocked(n){if(n>getUnlocked())localStorage.setItem(UNLOCK_KEY,n.toString());}
+function getStars(l){return parseInt(localStorage.getItem(STARS_KEY+"_"+l)||"0");}
+function setStars(l,s){if(s>getStars(l))localStorage.setItem(STARS_KEY+"_"+l,s.toString());}
+function getMoney(){return parseInt(localStorage.getItem(MONEY_KEY)||"0");}
+function setMoney(m){localStorage.setItem(MONEY_KEY,m.toString());}
+function addMoney(m){setMoney(getMoney()+m);}
+function getOwnedItems(){try{return JSON.parse(localStorage.getItem(SHOP_KEY)||"[]");}catch(e){return[];}}
+function ownItem(id){var o=getOwnedItems();if(o.indexOf(id)<0){o.push(id);localStorage.setItem(SHOP_KEY,JSON.stringify(o));}}
+function getOwnedUpgrades(){try{return JSON.parse(localStorage.getItem(UPGRADES_KEY)||"[]");}catch(e){return[];}}
+function ownUpgrade(id){var o=getOwnedUpgrades();if(o.indexOf(id)<0){o.push(id);localStorage.setItem(UPGRADES_KEY,JSON.stringify(o));}}
+function getOwnedAttachments(){try{return JSON.parse(localStorage.getItem(ATTACH_KEY)||"[]");}catch(e){return[];}}
+function ownAttachment(id){var o=getOwnedAttachments();if(o.indexOf(id)<0){o.push(id);localStorage.setItem(ATTACH_KEY,JSON.stringify(o));}}
+function hasAttachment(id){return getOwnedAttachments().indexOf(id)>=0;}
+function bestVestHp(){var o=getOwnedItems();var b=0;SHOP_VESTS.forEach(function(v){if(o.indexOf(v.id)>=0&&v.vestHp>b)b=v.vestHp;});return b;}
+function applyWeaponUpgrades(w){
+  var owned=getOwnedUpgrades();
+  SHOP_UPGRADES.forEach(function(u){if(owned.indexOf(u.id)<0)return;var wp=w[u.weapon];if(!wp)return;
+    if(u.type==="damage")wp.damage*=u.mult;
+    else if(u.type==="mag"){wp.mag+=u.add;wp.ammo=wp.mag;}
+    else if(u.type==="fireRate")wp.fireRate*=u.mult;
+  });
+  var atts=getOwnedAttachments();
+  SHOP_ATTACHMENTS.forEach(function(a){if(atts.indexOf(a.id)<0)return;var wp=w[a.weapon];if(!wp)return;
+    if(a.type==="mag"){wp.mag+=a.add;wp.ammo=wp.mag;}
+    if(a.type==="scope")wp.hasScope=true;
+    if(a.type==="silencer")wp.hasSilencer=true;
+  });
+}
+function updateMoneyDisplay(){
+  var m1=document.getElementById("menuMoney");if(m1)m1.textContent=getMoney();
+  var m2=document.getElementById("shopMoney");if(m2)m2.textContent=getMoney();
+  var m3=document.getElementById("gameMoney");if(m3)m3.textContent=getMoney();
+}
+var currentShopTab="weapons";
+function buildShop(){
+  var c=document.getElementById("shopItems");c.innerHTML="";
+  if(currentShopTab==="vest"){
+    var owned=getOwnedItems();
+    SHOP_VESTS.forEach(function(it){
+      var has=owned.indexOf(it.id)>=0;
+      var el=document.createElement("div");
+      el.className="shopItem"+(has?" owned":"");
+      el.innerHTML='<div class="info"><div class="title">'+it.name+(has?" ✅":"")+'</div><div class="desc">'+it.desc+'</div></div>'+(has?'<span style="color:#0f0">خریداری</span>':'<div class="price">💰 '+it.price+'</div>')+'<br>'+(has?"":'<button class="buyBtn" data-id="'+it.id+'">خرید</button>');
+      c.appendChild(el);
+    });
+  } else if(currentShopTab==="upgrades"){
+    var owned2=getOwnedUpgrades();
+    SHOP_UPGRADES.forEach(function(it){
+      var has=owned2.indexOf(it.id)>=0;
+      var el=document.createElement("div");
+      el.className="shopItem"+(has?" owned":"");
+      el.innerHTML='<div class="info"><div class="title">'+it.name+(has?" ✅":"")+'</div><div class="desc">'+it.desc+'</div></div>'+(has?'<span style="color:#0f0">ارتقا</span>':'<div class="price">💰 '+it.price+'</div>')+'<br>'+(has?"":'<button class="buyBtn" data-id="'+it.id+'">خرید</button>');
+      c.appendChild(el);
+    });
+  } else if(currentShopTab==="attachments"){
+    var owned3=getOwnedAttachments();
+    SHOP_ATTACHMENTS.forEach(function(it){
+      var has=owned3.indexOf(it.id)>=0;
+      var el=document.createElement("div");
+      el.className="shopItem"+(has?" owned":"");
+      el.innerHTML='<div class="info"><div class="title">'+it.name+(has?" ✅":"")+'</div><div class="desc">'+it.desc+'</div></div>'+(has?'<span style="color:#0f0">نصب</span>':'<div class="price">💰 '+it.price+'</div>')+'<br>'+(has?"":'<button class="buyBtn" data-id="'+it.id+'">خرید</button>');
+      c.appendChild(el);
+    });
+  } else {
+    var info=[{n:"کلاشنیکوف",d:"دمیج ۳۴"},{n:"رگبار",d:"دمیج ۱۲"},{n:"ساچمه‌زن",d:"دمیج ۲۲×۸"},{n:"اسنایپ",d:"دمیج ۵۰۰"},{n:"کلت",d:"دمیج ۸"},{n:"آرپی‌جی",d:"دمیج ۱۵۰"}];
+    info.forEach(function(x){
+      var el=document.createElement("div");
+      el.className="shopItem owned";
+      el.innerHTML='<div class="info"><div class="title">'+x.n+'</div><div class="desc">'+x.d+'</div></div><span style="color:#0f0">✅</span>';
+      c.appendChild(el);
+    });
+  }
+  c.querySelectorAll(".buyBtn").forEach(function(b){
+    b.addEventListener("click",function(){
+      var id=b.dataset.id;
+      var item=null;
+      if(currentShopTab==="vest")item=SHOP_VESTS.filter(function(x){return x.id===id;})[0];
+      else if(currentShopTab==="upgrades")item=SHOP_UPGRADES.filter(function(x){return x.id===id;})[0];
+      else if(currentShopTab==="attachments")item=SHOP_ATTACHMENTS.filter(function(x){return x.id===id;})[0];
+      if(!item||getMoney()<item.price)return;
+      setMoney(getMoney()-item.price);
+      if(currentShopTab==="vest")ownItem(id);
+      else if(currentShopTab==="upgrades")ownUpgrade(id);
+      else ownAttachment(id);
+      buildShop();updateMoneyDisplay();
+    });
+  });
+}
+document.querySelectorAll(".shopTab").forEach(function(t){
+  t.addEventListener("click",function(){
+    document.querySelectorAll(".shopTab").forEach(function(x){x.classList.remove("active");});
+    t.classList.add("active");
+    currentShopTab=t.dataset.tab;
+    buildShop();
+  });
+});
+function buildLevelMenu(){
+  var grid=document.getElementById("levelGrid");grid.innerHTML="";
+  var unlocked=getUnlocked();
+  LEVELS.forEach(function(lv){
+    var btn=document.createElement("div");
+    var cls="levelBtn";
+    if(lv.num>unlocked)cls+=" locked";
+    if(lv.isFinal)cls+=" final";
+    else if(lv.boss)cls+=" boss";
+    btn.className=cls;
+    var s=getStars(lv.num);
+    var name=lv.isFinal?T[LANG].finalBoss:(lv.boss?T[LANG].boss+" "+lv.bossTier:T[LANG].fields[(lv.num-1)%5]);
+    btn.innerHTML="مرحله "+lv.num+'<span class="levelName">'+name+'</span>'+(s>0?'<span class="stars">'+"⭐".repeat(s)+'</span>':"");
+    if(lv.num<=unlocked)btn.addEventListener("click",function(){startLevel(lv.num);});
+    grid.appendChild(btn);
+  });
+}
+document.getElementById("startBtn").addEventListener("click",function(){document.getElementById("mainMenu").classList.add("hide");document.getElementById("levelMenu").classList.add("show");buildLevelMenu();});
+document.getElementById("shopBtn").addEventListener("click",function(){document.getElementById("mainMenu").classList.add("hide");document.getElementById("shopMenu").classList.add("show");buildShop();});
+document.getElementById("shopBackBtn").addEventListener("click",function(){document.getElementById("shopMenu").classList.remove("show");document.getElementById("mainMenu").classList.remove("hide");});
+document.getElementById("settingsBtn").addEventListener("click",function(){document.getElementById("mainMenu").classList.add("hide");document.getElementById("settingsMenu").classList.add("show");});
+document.getElementById("settingsBackBtn").addEventListener("click",function(){document.getElementById("settingsMenu").classList.remove("show");document.getElementById("mainMenu").classList.remove("hide");});
+document.getElementById("langFaBtn").addEventListener("click",function(){LANG="fa";document.getElementById("langFaBtn").classList.add("active");document.getElementById("langEnBtn").classList.remove("active");});
+document.getElementById("langEnBtn").addEventListener("click",function(){LANG="en";document.getElementById("langEnBtn").classList.add("active");document.getElementById("langFaBtn").classList.remove("active");});
+document.getElementById("backBtn").addEventListener("click",function(){document.getElementById("levelMenu").classList.remove("show");document.getElementById("mainMenu").classList.remove("hide");});
+document.getElementById("nextLevelBtn").addEventListener("click",function(){document.getElementById("levelComplete").classList.remove("show");startLevel(Math.min(20,currentLevel+1));});
+document.getElementById("backToMenuBtn").addEventListener("click",function(){document.getElementById("levelComplete").classList.remove("show");document.getElementById("levelMenu").classList.add("show");buildLevelMenu();});
+document.getElementById("retryBtn").addEventListener("click",function(){document.getElementById("gameOver").classList.remove("show");startLevel(currentLevel);});
+document.getElementById("backToMenu2Btn").addEventListener("click",function(){document.getElementById("gameOver").classList.remove("show");document.getElementById("levelMenu").classList.add("show");buildLevelMenu();});
+var currentLevel=1,gameState=null;
+function startLevel(n){
+  currentLevel=Math.max(1,Math.min(20,parseInt(n)||1));
+  document.getElementById("levelMenu").classList.remove("show");
+  document.getElementById("shopMenu").classList.remove("show");
+  document.getElementById("pauseMenu").classList.remove("show");
+  document.getElementById("gameOver").classList.remove("show");
+  document.getElementById("levelComplete").classList.remove("show");
+  document.getElementById("loading").classList.add("show");
+  if(gameState){gameState.dispose();gameState=null;}
+  showVanIntro(currentLevel);
+}
+function showVanIntro(levelNum){
+  document.getElementById("loading").classList.remove("show");
+  var van=document.getElementById("vanContainer");
+  van.classList.add("show");
+  van.innerHTML="";
+  var W=innerWidth,H=innerHeight;
+  var scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x87ceeb);
+  scene.fog=new THREE.Fog(0x87ceeb,40,200);
+  var cam=new THREE.PerspectiveCamera(70,W/H,0.1,500);
+  var renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(W,H);
+  van.appendChild(renderer.domElement);
+  scene.add(new THREE.AmbientLight(0xffffff,0.75));
+  var sun=new THREE.DirectionalLight(0xffffff,1);
+  sun.position.set(30,50,20);scene.add(sun);
+  var grnd=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshStandardMaterial({color:0x4a7a3a}));
+  grnd.rotation.x=-Math.PI/2;scene.add(grnd);
+  var vanG=new THREE.Group();
+  var vanMat=new THREE.MeshStandardMaterial({color:0x2a3a2a,metalness:0.5,roughness:0.6});
+  var glassMat=new THREE.MeshStandardMaterial({color:0x111122,metalness:0.9,roughness:0.1});
+  var tireMat=new THREE.MeshStandardMaterial({color:0x111111});
+  var body=new THREE.Mesh(new THREE.BoxGeometry(3,2.5,6),vanMat);body.position.y=1.7;vanG.add(body);
+  var cabin=new THREE.Mesh(new THREE.BoxGeometry(3,1.5,1.5),vanMat);cabin.position.set(0,1.2,3.2);vanG.add(cabin);
+  var windshield=new THREE.Mesh(new THREE.BoxGeometry(2.8,1.2,0.1),glassMat);windshield.position.set(0,1.5,3.95);vanG.add(windshield);
+  for(var si=-1;si<=1;si+=2){
+    var sw1=new THREE.Mesh(new THREE.BoxGeometry(0.1,1,1.3),glassMat);sw1.position.set(si*1.5,1.5,3);vanG.add(sw1);
+    var sw2=new THREE.Mesh(new THREE.BoxGeometry(0.1,1.2,1.5),glassMat);sw2.position.set(si*1.5,1.8,1);vanG.add(sw2);
+    var sw3=new THREE.Mesh(new THREE.BoxGeometry(0.1,1.2,1.5),glassMat);sw3.position.set(si*1.5,1.8,-1);vanG.add(sw3);
+  }
+  var rearDoor=new THREE.Mesh(new THREE.BoxGeometry(2.5,2.2,0.15),vanMat);rearDoor.position.set(-1.7,1.7,-3.05);vanG.add(rearDoor);
+  var rearDoor2=new THREE.Mesh(new THREE.BoxGeometry(2.5,2.2,0.15),vanMat);rearDoor2.position.set(1.7,1.7,-3.05);vanG.add(rearDoor2);
+  [[-1.5,0.6,2],[1.5,0.6,2],[-1.5,0.6,-2],[1.5,0.6,-2]].forEach(function(p){
+    var tire=new THREE.Mesh(new THREE.CylinderGeometry(0.6,0.6,0.4,16),tireMat);
+    tire.rotation.z=Math.PI/2;tire.position.set(p[0],p[1],p[2]);vanG.add(tire);
+  });
+  vanG.position.set(0,0,0);scene.add(vanG);
+  var player=new THREE.Group();
+  var pBody=new THREE.Mesh(new THREE.BoxGeometry(0.6,1.1,0.35),new THREE.MeshStandardMaterial({color:0x2a3a4a}));pBody.position.y=0.9;player.add(pBody);
+  var pHead=new THREE.Mesh(new THREE.SphereGeometry(0.25,12,12),new THREE.MeshStandardMaterial({color:0xffcc99}));pHead.position.y=1.6;player.add(pHead);
+  var pHelm=new THREE.Mesh(new THREE.SphereGeometry(0.28,12,12,0,Math.PI*2,0,Math.PI/2),new THREE.MeshStandardMaterial({color:0x1a2a3a}));pHelm.position.y=1.65;player.add(pHelm);
+  var pLegL=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.8,0.2),new THREE.MeshStandardMaterial({color:0x2a3a4a}));pLegL.position.set(-0.15,0.4,0);player.add(pLegL);
+  var pLegR=pLegL.clone();pLegR.position.x=0.15;player.add(pLegR);
+  var pArmL=new THREE.Mesh(new THREE.BoxGeometry(0.15,0.8,0.15),new THREE.MeshStandardMaterial({color:0x2a3a4a}));pArmL.position.set(-0.4,1.2,0);player.add(pArmL);
+  var pArmR=pArmL.clone();pArmR.position.x=0.4;player.add(pArmR);
+  player.position.set(0,0,0);scene.add(player);
+  cam.position.set(0,4,-12);cam.lookAt(0,2,0);
+  var t=0;var clock=new THREE.Clock();var disposed=false;
+  function loop(){
+    if(disposed)return;
+    requestAnimationFrame(loop);
+    var dt=Math.min(clock.getDelta(),0.05);
+    t+=dt;
+    if(t<0.8){var k=t/0.8;rearDoor.rotation.y=-1.3*k;rearDoor2.rotation.y=1.3*k;}
+    if(t>=0.8&&t<2.5){var k2=(t-0.8)/1.7;player.position.z=-3-k2*4;var ph=t*8;pLegL.rotation.x=Math.sin(ph)*0.4;pLegR.rotation.x=-Math.sin(ph)*0.4;pArmL.rotation.x=-Math.sin(ph)*0.3;pArmR.rotation.x=Math.sin(ph)*0.3;}
+    if(t>=2.5){var k3=Math.min(1,(t-2.5)/0.5);player.position.z=-7-k3*1;pLegL.rotation.x*=0.9;pLegR.rotation.x*=0.9;}
+    if(t<2){cam.position.set(2,4-t*0.5,-12+t*2);cam.lookAt(0,1.5,-3);}
+    else{cam.position.set(4,2.5,-10);cam.lookAt(0,1.5,-5);}
+    renderer.render(scene,cam);
+    if(t>=3&&!disposed){disposed=true;van.classList.remove("show");van.innerHTML="";renderer.dispose();setTimeout(function(){document.getElementById("gameContainer").classList.add("show");initGame(levelNum);},100);}
+  }
+  loop();
+}
+function initGame(levelNum){
+  document.getElementById("loading").classList.remove("show");
+  document.getElementById("gameContainer").classList.add("show");
+  var levelCfg=LEVELS[levelNum-1];
+  var scene=new THREE.Scene();
+  var weather=levelCfg.weather;
+  var skyColor=0x87ceeb,fogNear=60,fogFar=250;
+  if(weather==="sunset")skyColor=0xff8844;
+  else if(weather==="cloudy")skyColor=0x8899aa;
+  else if(weather==="foggy"){skyColor=0xaaaabb;fogNear=20;fogFar=100;}
+  scene.background=new THREE.Color(skyColor);
+  scene.fog=new THREE.Fog(skyColor,fogNear,fogFar);
+  var camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,500);
+  var BASE_FOV=75,ZOOM_FOV=45,SNIPER_FOV=15;
+  var renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth,innerHeight);
+  document.getElementById("gameContainer").appendChild(renderer.domElement);
+  var onResize=function(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);};
+  addEventListener("resize",onResize);
+  scene.add(new THREE.AmbientLight(0xffffff,0.7));
+  var sun=new THREE.DirectionalLight(weather==="sunset"?0xffaa66:0xffffff,1);
+  sun.position.set(50,80,30);scene.add(sun);
+  var MAP_SIZE=120;
+  var groundGeo=new THREE.PlaneGeometry(MAP_SIZE*2,MAP_SIZE*2,60,60);
+  var gPos=groundGeo.attributes.position;
+  var th=levelCfg.terrain;
+  for(var gi=0;gi<gPos.count;gi++){
+    var gx=gPos.getX(gi),gy=gPos.getY(gi);
+    gPos.setZ(gi,Math.sin(gx*0.15)*Math.cos(gy*0.15)*th+Math.sin(gx*0.05+gy*0.08)*th*0.8);
+  }
+  groundGeo.computeVertexNormals();
+  var ground=new THREE.Mesh(groundGeo,new THREE.MeshStandardMaterial({color:weather==="sunset"?0x5a6a3a:0x4a7a3a}));
+  ground.rotation.x=-Math.PI/2;scene.add(ground);
+  function getTerrainY(x,z){return Math.sin(x*0.15)*Math.cos(z*0.15)*th+Math.sin(x*0.05+z*0.08)*th*0.8;}
+  var wallGroup=new THREE.Group();
+  var wallMat=new THREE.MeshStandardMaterial({color:0x6a6a7a});
+  var WT=1.5,WH=8;
+  for(var wi=0;wi<40;wi++){
+    var wo=-MAP_SIZE+(MAP_SIZE*2/40)*wi+(MAP_SIZE*2/40)/2;
+    var w1=new THREE.Mesh(new THREE.BoxGeometry(MAP_SIZE*2/40,WH,WT),wallMat);w1.position.set(wo,WH/2-1,-MAP_SIZE);wallGroup.add(w1);
+    var w2=w1.clone();w2.position.z=MAP_SIZE;wallGroup.add(w2);
+    var w3=new THREE.Mesh(new THREE.BoxGeometry(WT,WH,MAP_SIZE*2/40),wallMat);w3.position.set(-MAP_SIZE,WH/2-1,wo);wallGroup.add(w3);
+    var w4=w3.clone();w4.position.x=MAP_SIZE;wallGroup.add(w4);
+  }
+  scene.add(wallGroup);
+  var treeGroup=new THREE.Group();
+  for(var ti=0;ti<levelCfg.trees;ti++){
+    var tx=(Math.random()-0.5)*(MAP_SIZE*1.6),tz=(Math.random()-0.5)*(MAP_SIZE*1.6);
+    if(Math.abs(tx)<5&&Math.abs(tz)<5)continue;
+    var ty=getTerrainY(tx,tz);
+    var trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.3,2.5,8),new THREE.MeshStandardMaterial({color:0x5a3a1a}));
+    trunk.position.set(tx,ty+1.25,tz);treeGroup.add(trunk);
+    var leaves=new THREE.Mesh(new THREE.SphereGeometry(1.3,8,8),new THREE.MeshStandardMaterial({color:0x2a6a2a}));
+    leaves.position.set(tx,ty+3.2,tz);treeGroup.add(leaves);
+  }
+  scene.add(treeGroup);
+  var rockGroup=new THREE.Group();
+  for(var ri=0;ri<levelCfg.rocks;ri++){
+    var rx=(Math.random()-0.5)*(MAP_SIZE*1.5),rz=(Math.random()-0.5)*(MAP_SIZE*1.5);
+    if(Math.abs(rx)<6&&Math.abs(rz)<6)continue;
+    var ry=getTerrainY(rx,rz);
+    var rock=new THREE.Mesh(new THREE.DodecahedronGeometry(1.5+Math.random()*2,0),new THREE.MeshStandardMaterial({color:0x707070}));
+    rock.position.set(rx,ry+1.5,rz);
+    rock.rotation.set(Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI);
+    rockGroup.add(rock);
+  }
+  scene.add(rockGroup);
+  var bunkerGroup=new THREE.Group();
+  for(var bi=0;bi<levelCfg.bunkers;bi++){
+    var bx=(Math.random()-0.5)*(MAP_SIZE*1.3),bz=(Math.random()-0.5)*(MAP_SIZE*1.3);
+    if(Math.abs(bx)<8&&Math.abs(bz)<8)continue;
+    var by=getTerrainY(bx,bz);
+    var bw=3.5+Math.random()*2,bh=1.4,bd=2+Math.random();
+    var bk=new THREE.Mesh(new THREE.BoxGeometry(bw,bh,bd),new THREE.MeshStandardMaterial({color:0x7a7a6a}));
+    bk.position.set(bx,by+bh/2,bz);bk.rotation.y=Math.random()*Math.PI;
+    bunkerGroup.add(bk);
+  }
+  scene.add(bunkerGroup);
+  var carGroup=new THREE.Group();
+  var carColors=[0x3a5a3a,0x6a5a3a,0x4a6a3a,0x5a4a2a,0x3a4a3a,0x2a3a4a];
+  function createCar(x,z,color){
+    var cy=getTerrainY(x,z);
+    var cg=new THREE.Group();
+    var cb=new THREE.Mesh(new THREE.BoxGeometry(2.1,0.75,4.4),new THREE.MeshStandardMaterial({color:color,metalness:0.5}));
+    cb.position.y=0.95;cg.add(cb);
+    var cc=new THREE.Mesh(new THREE.BoxGeometry(1.9,0.9,2.0),new THREE.MeshStandardMaterial({color:0x0a0a1a,metalness:0.9}));
+    cc.position.set(0,1.85,-0.15);cg.add(cc);
+    [[-1.1,0.5,1.4],[1.1,0.5,1.4],[-1.1,0.5,-1.4],[1.1,0.5,-1.4]].forEach(function(p){
+      var tire=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,0.35,12),new THREE.MeshStandardMaterial({color:0x0a0a0a}));
+      tire.rotation.z=Math.PI/2;tire.position.set(p[0],p[1],p[2]);cg.add(tire);
+    });
+    cg.position.set(x,cy,z);cg.rotation.y=Math.random()*Math.PI*2;
+    carGroup.add(cg);
+  }
+  for(var ci=0;ci<8;ci++){
+    var cx,cz,ctries=0;
+    do{cx=(Math.random()-0.5)*(MAP_SIZE*1.6);cz=(Math.random()-0.5)*(MAP_SIZE*1.6);ctries++;}while(Math.hypot(cx,cz)<12&&ctries<20);
+    createCar(cx,cz,carColors[ci%carColors.length]);
+  }
+  scene.add(carGroup);
